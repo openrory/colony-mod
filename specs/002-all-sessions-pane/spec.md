@@ -41,9 +41,9 @@ A user often runs several Claude Code sessions at once, each with its own agents
 
 - Two sessions in the same folder or with the same name: each is shown separately and labelled so they can be told apart.
 - A session that crashes without cleaning up: its group is marked stale and then removed after a short time.
-- Sessions running different versions of the mod: a session whose shared summary the pane cannot read is shown as a single unknown figure, never as an error or a blank pane.
+- Sessions running different versions of the mod, or whose summary cannot be read: the summary is ignored; if the session is also known from the sessions folder (spec 003) it is shown as a single limited figure, otherwise it is not shown. Never an error or a blank pane.
 - Many sessions at once (e.g. 10): the pane stays readable, collapsing quiet sessions before groups that need attention.
-- The user turns sharing off or on while sessions are running: the change takes effect without restarting sessions, and turning it off removes the session's shared summary.
+- The user turns sharing off or on while sessions are running: the change takes effect without restarting sessions (changing the option reloads the mod), and turning it off replaces the session's shared summary with an ended marker that contains no name, folder or agent information.
 
 ## Requirements *(mandatory)*
 
@@ -51,12 +51,13 @@ A user often runs several Claude Code sessions at once, each with its own agents
 
 - **FR-001**: The mod MUST let the pane show agents from all of the user's other running sessions on the same machine, each session as its own labelled group containing that session's agents and subagents with their states.
 - **FR-002**: Sharing MUST be opt-in and off by default. While it is off, a session MUST NOT make its agents' state visible to other sessions and MUST NOT read other sessions' shared state.
-- **FR-003**: A session MUST share only a summary of its own agents' state (label, state, parent, model, listening source, and current exchanges) and MUST NOT share conversation content, prompts, tool inputs or outputs, or file contents.
+- **FR-003**: A session MUST share only a summary of its own agents' state (session name and folder, and for each agent: label, state, parent, model, token totals and listening source, plus current exchanges) and MUST NOT share conversation content, prompts, tool inputs or outputs, or file contents.
 - **FR-004**: Other sessions' agents MUST appear with the same states, looks and exchange animation as local agents (spec 001: FR-003, FR-004, FR-008), updating within 3 seconds of a change in the originating session.
 - **FR-005**: A session group MUST be marked as stale when its session has not updated for a short period, and MUST be removed when the session has ended or has stayed stale beyond a longer period.
 - **FR-006**: A pending agent in any session MUST make its session group visibly marked as needing attention, even when the group is collapsed.
-- **FR-007**: A session that does not share MUST still be shown, if the user has chosen to show other sessions, as a single clearly marked figure with an unknown or limited state, never as invented detail.
+- **FR-007**: A session that does not share MUST still be shown, if the user has set the other-sessions folder (spec 003), as a single clearly marked figure with an unknown or limited state, never as invented detail.
 - **FR-008**: The pane MUST ignore any shared summary it cannot read or that comes from an unsupported version, without failing, and the README MUST describe what is shared and how to turn sharing off.
+- **FR-009**: A pending agent in a session that shares MUST also be counted in the status-line summary and trigger the pending toast. Sessions shown only as single limited figures (spec 003) still do not count.
 
 ### Key Entities
 
@@ -76,7 +77,7 @@ A user often runs several Claude Code sessions at once, each with its own agents
 
 - This feature extends the single-session pane (spec 001); everything about how a figure looks and animates is defined there.
 - Sharing covers one user's sessions on one machine; other users, other machines and remote sessions are out of scope.
-- Sharing is controlled by a mod option, off by default, and applies to the session it is set in; the same option decides whether that session's pane shows other sessions.
-- The earlier session-level view (other sessions as single figures, no agent detail) is kept as the fallback for sessions that do not share (FR-026).
+- Sharing is controlled by the option `sharedFolder` (off by default). Showing sessions that do not share is controlled separately by the option `sessionsDirectory` from spec 003 (also off by default). A session appears with full detail when it shares into the folder, and as a single limited figure when it only appears in the sessions folder.
+- The earlier session-level view (other sessions as single figures, no agent detail) is kept as the fallback for sessions that do not share (FR-007).
 - A shared summary is considered stale after about 10 seconds without an update and is removed after about 60 seconds, or immediately when its session ends cleanly.
 - Sessions running the mod at user scope (see the README install steps) are the ones that can share; a session without the mod can only be shown as a single figure.

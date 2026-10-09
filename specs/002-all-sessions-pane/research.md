@@ -18,7 +18,9 @@ Source: the mods plugin-authoring reference and the engine's `claude-code.d.ts` 
 
 - **Finding**: the API gives no home or config directory path, so the mod cannot choose a default location.
 - **Decision**: a new option `sharedFolder` (absolute path, default empty). Empty = sharing off and no reading of other sessions' shared state (FR-002, SC-003). Set = this session writes its summary there and its pane reads all summaries there. The same user settings apply to all of the user's sessions, so one setting turns it on everywhere. The existing `sessionsDirectory` option keeps controlling only the fallback peer view.
-- **Alternatives**: separate "share" and "view" options (more flexibility, more confusion; the spec assumes one option).
+- **Session name and folder**: the API gives `$.session.cwd()` and `$.session.id()` but no session name, so the name is derived from the last segment of the folder (or a short id). A change to an option in the config menu reloads the mod, so turning sharing on or off takes effect without a restart; module variables reset on reload, so the previously used folder is remembered in `$.store`.
+- **Two options**: `sharedFolder` controls sharing; the existing `sessionsDirectory` (spec 003) controls the fallback view of sessions that do not share.
+- **Alternatives**: a single option for both (simpler, but the fallback needs the folder holding Claude Code's own session files, which is a different location).
 
 ## R4. Write and read cadence
 
@@ -32,4 +34,4 @@ Source: the mods plugin-authoring reference and the engine's `claude-code.d.ts` 
 
 ## R6. Versioning and unreadable files
 
-- **Decision**: every summary has `version: 1`. A reader ignores files with a higher or missing version, invalid JSON, or failed validation, and shows that session (if known from the session-file fallback) as a single unknown figure (FR-008). Unknown extra fields are ignored so a minor addition does not break older readers.
+- **Decision**: every summary has `version: 1`. A reader ignores files with a higher or missing version, invalid JSON, or failed validation, and shows that session as a single limited figure only if it is also known from the session-file fallback; otherwise it is not shown (FR-008). Unknown extra fields are ignored so a minor addition does not break older readers.
