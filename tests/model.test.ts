@@ -9,7 +9,7 @@ import {
   WANDER_MAX,
   type Signal,
 } from '../src/model'
-import type { Agent, Colony } from '../types'
+import type { Agent, Colony, SessionGroup } from '../types'
 
 const RETENTION = 30_000
 
@@ -530,4 +530,43 @@ test('a reusable agent that completes rests instead of being removed', () => {
   // It was never "finished", so a stray state event still reaches it (it works again).
   c = reduce(c, { type: 'agent-state', id: 'r', state: 'in-progress', at: 2000 })
   expect(at(c, 'r').state).toBe('in-progress')
+})
+
+const otherSession = (sessionId: string): SessionGroup => ({
+  sessionId,
+  name: 'app',
+  folder: '/Users/me/app',
+  updatedAt: 1,
+  source: 'shared',
+  freshness: 'live',
+  agents: [],
+  exchanges: [],
+  needsAttention: false,
+})
+
+test('a sessions signal replaces the other sessions wholesale', () => {
+  const start = run([{ type: 'agent-added', id: 'main', label: 'main', parentId: null, at: 0 }])
+  expect(start.sessions).toEqual({})
+  const one = reduce(start, { type: 'sessions', sessions: { a: otherSession('a') }, at: 1 })
+  expect(Object.keys(one.sessions)).toEqual(['a'])
+  const two = reduce(one, { type: 'sessions', sessions: { b: otherSession('b') }, at: 2 })
+  expect(Object.keys(two.sessions)).toEqual(['b'])
+})
+
+test('a sessions signal with nothing clears the other sessions', () => {
+  const one = reduce(initialColony(RETENTION), { type: 'sessions', sessions: { a: otherSession('a') }, at: 1 })
+  const cleared = reduce(one, { type: 'sessions', sessions: {}, at: 2 })
+  expect(cleared.sessions).toEqual({})
+})
+
+test('a sessions signal leaves local agents and exchanges untouched', () => {
+  const local = run([
+    { type: 'agent-added', id: 'main', label: 'main', parentId: null, at: 0 },
+    { type: 'agent-added', id: 'sub', label: 'sub', parentId: 'main', at: 0 },
+    { type: 'exchange-open', fromId: 'main', toId: 'sub', reason: 'spawn', at: 0 },
+  ])
+  const after = reduce(local, { type: 'sessions', sessions: { a: otherSession('a') }, at: 5 })
+  expect(after.agents).toBe(local.agents)
+  expect(after.exchanges).toBe(local.exchanges)
+  expect(after.tick).toBe(local.tick)
 })

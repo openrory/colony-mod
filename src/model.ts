@@ -1,4 +1,4 @@
-import type { Agent, AgentState, Colony, Exchange, Usage } from '../types'
+import type { Agent, AgentState, Colony, Exchange, SessionGroup, Usage } from '../types'
 import { resolveState } from './priority'
 
 export const MAIN_ID = 'main'
@@ -64,6 +64,8 @@ export type Signal =
   | { type: 'agent-step'; id: string; model?: string; at: number }
   // The other sessions on this machine, as the pane last read them; replaces the figures for them.
   | { type: 'peers'; peers: Peer[]; at: number }
+  // The other sessions as the shared folder and the peer list last showed them; replaces them all.
+  | { type: 'sessions'; sessions: Record<string, SessionGroup>; at: number }
   | { type: 'tick'; at: number }
   | {
       type: 'reconcile'
@@ -76,7 +78,7 @@ const WORKING_STATES: ReadonlyArray<AgentState> = ['in-progress', 'pending', 'li
 const BURST_REASONS: ReadonlyArray<ExchangeReason> = ['spawn', 'message', 'result']
 
 export function initialColony(retentionMs: number): Colony {
-  return { agents: {}, exchanges: {}, tick: 0, retentionMs }
+  return { agents: {}, exchanges: {}, tick: 0, retentionMs, sessions: {} }
 }
 
 export function exchangeId(fromId: string, toId: string): string {
@@ -394,6 +396,9 @@ export function reduce(colony: Colony, signal: Signal): Colony {
       }
       return setAgents(colony, agents)
     }
+
+    case 'sessions':
+      return { ...colony, sessions: signal.sessions }
 
     case 'exchange-open': {
       const id = exchangeId(signal.fromId, signal.toId)

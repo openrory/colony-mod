@@ -23,7 +23,7 @@ One JSON file per session in the user's shared folder (option `sharedFolder`), n
 ## Rules
 - **Allow-list only**: exactly the fields above. Anything else is dropped by the writer. Labels are truncated to 40 characters; no prompts, messages, tool inputs or outputs, or file contents. The only path shared is `folder`.
 - **Limits**: at most 100 agents; the writer drops the oldest completed agents first.
-- **Writer cadence**: on change at most once per second, plus a heartbeat every 5 s while any agent is active (R4). On a clean end or when sharing is switched off: one final write containing only `{ "version": 1, "sessionId": ..., "updatedAt": ..., "ended": true, "agents": [] }`, with no name and no folder.
+- **Writer cadence**: on change at most once per second, plus a heartbeat every 5 s while the session is alive, busy or idle (R4). On a clean end or when sharing is switched off: one final write containing only `{ "version": 1, "sessionId": ..., "updatedAt": ..., "ended": true, "agents": [] }`, with no name and no folder.
 - **Reader rules**: ignore invalid JSON, a `version` other than 1, or failed validation (FR-008); treat `ended: true` as removed; stale at 10 s and removed at 60 s since the newer of `updatedAt` and the file's modification time; skip the reader's own `sessionId`.
 - **Compatibility**: unknown extra fields are ignored. A change older readers cannot interpret bumps `version`.
 - **Trust**: files are user-writable data; the reader never executes anything from them and caps label length when drawing.

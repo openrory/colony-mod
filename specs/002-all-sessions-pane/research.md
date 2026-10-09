@@ -24,7 +24,7 @@ Source: the mods plugin-authoring reference and the engine's `claude-code.d.ts` 
 
 ## R4. Write and read cadence
 
-- **Decision**: rewrite the own summary only when it changed, at most once per second (trailing edge so the last change is always written), plus a heartbeat write every 5 s while any agent is active so readers can tell alive from stale. Readers poll every 1 s while the pane is open and `list` the folder, reading only files whose `mtimeMs` changed since the last poll.
+- **Decision**: rewrite the own summary only when it changed, at most once per second (trailing edge so the last change is always written), plus a heartbeat write every 5 s while the session is alive, busy or idle so readers can tell alive from stale. Readers poll every 1 s while the pane is open and `list` the folder, reading only files whose `mtimeMs` changed since the last poll.
 - **Rationale**: meets SC-001 (3 s) with headroom; cost is O(changed files) per poll (SC-004).
 - **Stale/removal**: stale after 10 s without update (shown dimmed, "stale"), removed after 60 s or on `ended` (spec Assumptions).
 

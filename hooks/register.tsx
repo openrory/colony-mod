@@ -12,12 +12,16 @@ import {
   contextFor,
   DEFAULT_RETENTION_SECONDS,
   nextRecentAgent,
-  pendingIdsOf,
+  pendingAgentsOf,
   readOptions,
   shouldAutoOpen,
   shouldToastPending,
+  shouldWrite,
   statusFor,
+  summaryPath,
 } from '../src/runtime'
+import { buildSummary, endedSummary, parseSummary } from '../src/snapshot'
+import { mergeSessions, type FileRead } from '../src/sessions'
 import { reconcileFromList, toSignals, type ListedAgent } from '../src/signals'
 import { estimateContextTokens } from '../src/context'
 import { renderPane } from '../src/view'
@@ -37,7 +41,9 @@ export const colonyAtom = atom(
 let reducedMotion = false
 let retentionMs = DEFAULT_RETENTION_MS
 let sessionsDirectory = ''
-let peerTimer: { cancel: () => void } | null = null
+let sessionTimer: { cancel: () => void } | null = null
+let shareTimer: { cancel: () => void } | null = null
+let sharedFolder = ''
 let recentAgentId: string | null = null
 let clockTimer: { cancel: () => void } | null = null
 let firstAutoDone = false
@@ -54,6 +60,8 @@ export function dispatch($: Dollar, signal: Signal): Promise<unknown> {
 async function applySignals($: Dollar, signals: Signal[]): Promise<void> {
   if (signals.length === 0) return
   await update($, colonyAtom, c => signals.reduce(reduce, c))
+  // Every state change is a chance to share (the throttle in shareState decides whether it is written now).
+  if (sharedFolder) await shareState($)
 }
 
 // The engine's agent list; an unreadable list reads as empty so the colony falls back to events.
@@ -105,19 +113,20 @@ async function refreshPane($: Dollar): Promise<void> {
     $.ui.status(status)
     lastStatus = status
   }
-  const pendingCount = pendingIdsOf(colony).length
+  const pending = pendingAgentsOf(colony)
   if (
-    shouldToastPending({ pendingCount, previousPendingCount: lastPendingCount, paneOpen, placed })
+    shouldToastPending({ pendingCount: pending.length, previousPendingCount: lastPendingCount, paneOpen, placed })
   ) {
-    const who = Object.values(colony.agents).find(a => a.state === 'pending')
-    $.ui.toast(`colony: ${who?.label ?? 'an agent'} needs you`)
+    $.ui.toast(`colony: ${pending[0]?.label ?? 'an agent'} needs you`)
   }
-  lastPendingCount = pendingCount
+  lastPendingCount = pending.length
 }
 
-// Other sessions: read the session files in the folder the person named. Nothing is read unless the
-// option is set; a file that cannot be read or parsed is skipped.
+// Other sessions. Two sources, both read only while the pane is open: the shared folder (option
+// `sharedFolder`, spec 002) and the peer folder (option `sessionsDirectory`, spec 003). Nothing is read
+// from a folder the person has not named; a file that cannot be read or parsed is skipped.
 const PEER_POLL_MS = 5000
+const SHARED_POLL_MS = 1000
 
 async function readPeers($: Dollar): Promise<Peer[]> {
   const now = await $.clock.now()
@@ -136,34 +145,164 @@ async function readPeers($: Dollar): Promise<Peer[]> {
   return peers
 }
 
+// The spec 003 peer view, unchanged: with no shared folder, the peer folder's sessions are the figures.
 async function pollPeers($: Dollar): Promise<void> {
-  if (!(await paneState($)).paneOpen) return stopPeers()
+  const peers = await readPeers($)
+  await applySignals($, [{ type: 'peers', peers, at: await $.clock.now() }])
+}
+
+// Summaries from the shared folder, each file read only when its modification time changed since the
+// last poll. A file that cannot be read or parsed leaves no summary; a missing folder leaves none at all.
+const sharedFiles = new Map<string, { mtimeMs: number; read: FileRead }>()
+
+async function readSharedFile($: Dollar, name: string): Promise<FileRead> {
+  const stem = name.slice(0, -'.json'.length)
   try {
-    const peers = await readPeers($)
-    await applySignals($, [{ type: 'peers', peers, at: await $.clock.now() }])
+    const text = await $.fs.read(`${sharedFolder.replace(/\/+$/, '')}/${name}`)
+    const summary = parseSummary(typeof text === 'string' ? text : '')
+    return { sessionId: summary?.sessionId ?? stem, summary }
+  } catch {
+    return { sessionId: stem, summary: null }
+  }
+}
+
+async function readShared($: Dollar): Promise<{ summaries: FileRead[]; mtimes: Record<string, number> }> {
+  const summaries: FileRead[] = []
+  const mtimes: Record<string, number> = {}
+  const entries = await $.fs.list(sharedFolder).catch(() => null)
+  if (!entries) return { summaries, mtimes }
+  const listed = new Set<string>()
+  for (const entry of entries) {
+    if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
+    listed.add(entry.name)
+    let cached = sharedFiles.get(entry.name)
+    if (!cached || cached.mtimeMs !== entry.mtimeMs) {
+      cached = { mtimeMs: entry.mtimeMs, read: await readSharedFile($, entry.name) }
+      sharedFiles.set(entry.name, cached)
+    }
+    summaries.push(cached.read)
+    mtimes[cached.read.sessionId] = entry.mtimeMs
+  }
+  for (const name of sharedFiles.keys()) if (!listed.has(name)) sharedFiles.delete(name)
+  return { summaries, mtimes }
+}
+
+async function selfIdOf($: Dollar): Promise<string | null> {
+  try {
+    return await $.session.id()
+  } catch {
+    return null
+  }
+}
+
+// Shared summaries and the peer list merged into session groups; a session that shares is drawn as shared,
+// once. The peer figures are then groups too, so they are not also sent as agents.
+async function pollShared($: Dollar): Promise<void> {
+  const now = await $.clock.now()
+  const peers = sessionsDirectory ? await readPeers($).catch((): Peer[] => []) : []
+  const { summaries, mtimes } = await readShared($)
+  const sessions = mergeSessions({ summaries, peers, selfId: await selfIdOf($), now, mtimes })
+  await applySignals($, [{ type: 'sessions', sessions, at: now }])
+}
+
+async function pollSessions($: Dollar): Promise<void> {
+  if (!(await paneState($)).paneOpen) return stopSessions()
+  try {
+    if (sharedFolder) await pollShared($)
+    else await pollPeers($)
     await syncClock($)
   } catch {
     // The folder is missing or unreadable: no other sessions are shown.
   }
 }
 
-function stopPeers(): void {
-  peerTimer?.cancel()
-  peerTimer = null
+function stopSessions(): void {
+  sessionTimer?.cancel()
+  sessionTimer = null
 }
 
-async function startPeers($: Dollar): Promise<void> {
-  if (!sessionsDirectory || peerTimer) return
-  peerTimer = $.clock.every(PEER_POLL_MS, () => {
-    void pollPeers($).catch(() => {})
+async function startSessions($: Dollar): Promise<void> {
+  if ((!sharedFolder && !sessionsDirectory) || sessionTimer) return
+  sessionTimer = $.clock.every(sharedFolder ? SHARED_POLL_MS : PEER_POLL_MS, () => {
+    void pollSessions($).catch(() => {})
   })
-  await pollPeers($)
+  await pollSessions($)
+}
+
+// Own summary (spec 002). Written only while the shared folder is set. buildSummary is the only content;
+// the content is compared without its time, and shouldWrite decides when a change or a heartbeat goes out.
+const SHARE_TICK_MS = 250
+const LAST_FOLDER_KEY = 'lastSharedFolder'
+let lastWrittenKey: string | null = null
+let lastWriteAt = Number.NEGATIVE_INFINITY
+let lastHeartbeatAt = Number.NEGATIVE_INFINITY
+// Set when the session ends: the clock may still tick after it, and nothing may follow the ended marker.
+let sharingEnded = false
+
+// The session's id, folder and name. The API has no session name: the name is the folder's last
+// segment, or the first 8 characters of the id when the folder is empty.
+async function ownSession($: Dollar): Promise<{ id: string; name: string; folder: string }> {
+  const id = await $.session.id()
+  const folder = await $.session.cwd()
+  const last = folder.split('/').filter(Boolean).pop() ?? ''
+  return { id, name: last || id.slice(0, 8), folder }
+}
+
+async function shareState($: Dollar): Promise<void> {
+  if (!sharedFolder || sharingEnded) return
+  const now = await $.clock.now()
+  const colony = await read($, colonyAtom)
+  const session = await ownSession($)
+  const summary = buildSummary(colony, session, now)
+  const key = JSON.stringify({ ...summary, updatedAt: 0 })
+  const due = shouldWrite({
+    changed: key !== lastWrittenKey,
+    lastWriteAt,
+    now,
+    lastHeartbeatAt,
+  })
+  if (!due) return
+  // Stamped before the write, so a failing write is not retried on every tick.
+  lastWriteAt = now
+  lastHeartbeatAt = now
+  await $.fs.write(summaryPath(sharedFolder, session.id), JSON.stringify(summary))
+  lastWrittenKey = key
+}
+
+function startSharing($: Dollar): void {
+  if (!sharedFolder || shareTimer) return
+  // A trailing change is written by the next tick once the interval has passed; heartbeats ride the same tick.
+  shareTimer = $.clock.every(SHARE_TICK_MS, () => {
+    void shareState($).catch(() => {})
+  })
+}
+
+function stopSharing(): void {
+  shareTimer?.cancel()
+  shareTimer = null
+}
+
+// The ended marker for the session: no name, no folder, no agents.
+async function writeEnded($: Dollar, folder: string): Promise<void> {
+  const id = await $.session.id()
+  const now = await $.clock.now()
+  await $.fs.write(summaryPath(folder, id), JSON.stringify(endedSummary({ id }, now)))
+}
+
+// Sharing is off but this session shared before (the option was cleared and the mod reloaded): mark its
+// summary ended in the folder it last used, then forget that folder.
+async function endLeftoverShare($: Dollar): Promise<void> {
+  if (sharedFolder) return
+  const last = await $.store.get(LAST_FOLDER_KEY)
+  if (typeof last !== 'string' || last === '') return
+  await writeEnded($, last)
+  await $.store.delete(LAST_FOLDER_KEY)
 }
 
 async function showPane($: Dollar): Promise<void> {
   await reconcileAgents($)
   await $.ui.open({ id: PANE, title: PANE_TITLE })
-  await startPeers($)
+  await startSessions($)
   await refreshPane($)
 }
 
@@ -213,9 +352,24 @@ async function sessionStart($: Dollar, e: unknown): Promise<void> {
     description: 'Show or hide the agent colony pane',
   })
   await update($, colonyAtom, c => ({ ...c, retentionMs }))
+  await endLeftoverShare($)
+  if (sharedFolder) {
+    sharingEnded = false
+    await $.store.set(LAST_FOLDER_KEY, sharedFolder)
+    startSharing($)
+  }
   await fold($, 'session.start', e as Record<string, unknown>)
   await reconcileAgents($)
   // The pane opens on the first pending or first subagent (FR-001), or when the person runs /colony.
+}
+
+// The session ends: its summary is marked ended in the shared folder, or in the folder it last shared to
+// when sharing is off now (FR-003, spec edge case).
+async function sessionEnd($: Dollar): Promise<void> {
+  stopSharing()
+  sharingEnded = true
+  if (sharedFolder) await writeEnded($, sharedFolder)
+  else await endLeftoverShare($)
 }
 
 async function turnComplete($: Dollar, e: unknown): Promise<void> {
@@ -280,7 +434,7 @@ async function stepSeen($: Dollar, e: Record<string, unknown>): Promise<void> {
 async function uiClosed($: Dollar, e: unknown): Promise<void> {
   // Closing the pane with the person's own mark or key counts as hiding it (FR-001).
   const close = e as { id: string; origin: { kind: string } }
-  if (close.id === PANE) stopPeers()
+  if (close.id === PANE) stopSessions()
   if (close.id === PANE && close.origin.kind === 'person') await $.store.set(HIDDEN_KEY, true)
 }
 
@@ -289,6 +443,7 @@ export const register: Register = (on, options) => {
   reducedMotion = parsed.reducedMotion
   retentionMs = parsed.retentionMs
   sessionsDirectory = parsed.sessionsDirectory
+  sharedFolder = parsed.sharedFolder
 
   on('session.start', ($, e, next) => guarded(() => sessionStart($, e), () => next(e)))
 
@@ -305,6 +460,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.close', ($, e, next) => guarded(() => uiClosed($, e), () => next(e)))
+  on('session.end', ($, e, next) => guarded(() => sessionEnd($), () => next(e)))
 
   on('turn.start', ($, e, next) => guarded(() => foldEvent('turn.start', $, e), () => next(e)))
   on('turn.complete', ($, e, next) => guarded(() => turnComplete($, e), () => next(e)))

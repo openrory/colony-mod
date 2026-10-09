@@ -5,6 +5,7 @@ import { test, expect, mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
 import { STATE_COLOUR } from '../src/sprites'
 import { EYE_COLOUR } from '../src/view'
+import { parseSummary } from '../src/snapshot'
 
 const SESSION = { cwd: '/tmp/colony-test', surface: null, isInteractive: false }
 const TOOL_ANSWER = { result: { text: 'engine answer', isError: false } }
@@ -102,4 +103,173 @@ test('the pane draws a hover card with the full title, and eyes in their own col
   })
   expect(eyes.length).toBeGreaterThan(0)
   await ui.unmount()
+})
+
+// Shared summaries (spec 002): the engine's file answers are recorded so each test can see every
+// write, list and read the plugin makes. The writes are the plugin's own; nothing else writes.
+const SHARE = { folder: '/shared', id: 'sess-1', cwd: '/work/alpha' }
+type FileLog = { writes: Array<{ path: string; text: string }>; lists: string[]; reads: string[] }
+
+// Files the test puts in the shared folder: their names, modification times and text (a null text is unreadable).
+type FolderFile = { mtimeMs: number; text: string | null }
+
+function answerFiles(on: On, log: FileLog, files: Record<string, FolderFile> = {}) {
+  on('session.id', (() => ({ value: SHARE.id })) as never)
+  on('session.cwd', (() => ({ value: SHARE.cwd })) as never)
+  on('session.end', (() => ({ sessionId: SHARE.id })) as never)
+  on('fs.write', ((_$: unknown, e: { path: string; text: string }) => {
+    log.writes.push(e)
+    return { value: undefined }
+  }) as never)
+  on('fs.list', ((_$: unknown, e: { path: string }) => {
+    log.lists.push(e.path)
+    if (e.path !== SHARE.folder) return { value: [] }
+    return {
+      value: Object.entries(files).map(([name, f]) => ({
+        name,
+        kind: 'file',
+        size: 1,
+        mtimeMs: f.mtimeMs,
+        isLink: false,
+      })),
+    }
+  }) as never)
+  on('fs.read', ((_$: unknown, e: { path: string }) => {
+    log.reads.push(e.path)
+    const name = e.path.slice(SHARE.folder.length + 1)
+    const file = files[name]
+    if (!file || file.text === null) throw new Error('unreadable')
+    return { value: file.text }
+  }) as never)
+}
+
+const emptyLog = (): FileLog => ({ writes: [], lists: [], reads: [] })
+
+test('with the shared folder empty, no folder is written, listed or read', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  const log = emptyLog()
+  answerEngine(on)
+  answerFiles(on, log)
+  await $.session.start(SESSION as never)
+  await $.turn.start({ text: 'hello', turnId: 'turn_1' } as never)
+  await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'ls' } } as never)
+  await clock.advance(15_000)
+  await $.session.end({ reason: 'exit' } as never)
+  expect(log.writes).toEqual([])
+  expect(log.lists).toEqual([])
+  expect(log.reads).toEqual([])
+})
+
+test('with the shared folder set, a state change is written as this session\'s summary', { options: { sharedFolder: SHARE.folder } }, async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  const log = emptyLog()
+  answerEngine(on)
+  answerFiles(on, log)
+  await $.session.start(SESSION as never)
+  await clock.advance(2_000)
+  const before = log.writes.length
+  await $.turn.start({ text: 'hello', turnId: 'turn_1' } as never)
+  expect(log.writes.length - before).toBe(1)
+  const written = log.writes[log.writes.length - 1]!
+  expect(written.path).toBe(`${SHARE.folder}/${SHARE.id}.json`)
+  const summary = parseSummary(written.text)
+  expect(summary).not.toBe(null)
+  expect(summary!.sessionId).toBe(SHARE.id)
+  expect(summary!.name).toBe('alpha')
+  expect(summary!.folder).toBe(SHARE.cwd)
+  expect(summary!.agents.some(a => a.id === 'main')).toBe(true)
+})
+
+test('two changes within a second are one write, then the trailing write', { options: { sharedFolder: SHARE.folder } }, async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  const log = emptyLog()
+  answerEngine(on)
+  answerFiles(on, log)
+  await $.session.start(SESSION as never)
+  await clock.advance(2_000)
+  const before = log.writes.length
+  await $.turn.start({ text: 'hello', turnId: 'turn_1' } as never)
+  await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'ls' } } as never)
+  expect(log.writes.length - before).toBe(1)
+  await clock.advance(1_250)
+  expect(log.writes.length - before).toBe(2)
+  const trailing = parseSummary(log.writes[log.writes.length - 1]!.text)
+  expect(trailing!.agents.find(a => a.id === 'main')?.state).toBe('pending')
+})
+
+test('at session end with the folder set, one ended summary is written and nothing after it', { options: { sharedFolder: SHARE.folder } }, async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  const log = emptyLog()
+  answerEngine(on)
+  answerFiles(on, log)
+  await $.session.start(SESSION as never)
+  await $.turn.start({ text: 'hello', turnId: 'turn_1' } as never)
+  await clock.advance(2_000)
+  const before = log.writes.length
+  await $.session.end({ reason: 'exit' } as never)
+  await clock.advance(10_000)
+  expect(log.writes.length - before).toBe(1)
+  const written = log.writes[log.writes.length - 1]!
+  expect(written.path).toBe(`${SHARE.folder}/${SHARE.id}.json`)
+  const summary = parseSummary(written.text)
+  expect(summary!.ended).toBe(true)
+  expect(summary!.agents).toEqual([])
+  expect(written.text).not.toContain(SHARE.cwd)
+})
+
+test('after sharing was switched off, the next start writes one ended summary to the old folder', async ($, on) => {
+  const clock = mock.clock(on)
+  // What the earlier load left behind when it shared to the folder.
+  mock.store(on, { lastSharedFolder: SHARE.folder })
+  const log = emptyLog()
+  answerEngine(on)
+  answerFiles(on, log)
+  await $.session.start(SESSION as never)
+  expect(log.writes.length).toBe(1)
+  expect(log.writes[0]!.path).toBe(`${SHARE.folder}/${SHARE.id}.json`)
+  expect(parseSummary(log.writes[0]!.text)!.ended).toBe(true)
+  await clock.advance(10_000)
+  await $.session.end({ reason: 'exit' } as never)
+  expect(log.writes.length).toBe(1)
+  expect(log.lists).toEqual([])
+  expect(log.reads).toEqual([])
+})
+
+test('with the shared folder set, the other sessions summaries are read once per change and an unreadable file is skipped', { options: { sharedFolder: SHARE.folder } }, async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  const log = emptyLog()
+  const other = JSON.stringify({ version: 1, sessionId: 'other', name: 'beta', folder: '/work/beta', updatedAt: 0, agents: [] })
+  // The pane is open once the plugin has opened it.
+  let open = false
+  on('session.start', (() => ({ cwd: SESSION.cwd })) as never)
+  on('command.register', (() => ({ value: {} })) as never)
+  on('ui.open', (() => {
+    open = true
+    return { value: { isPlaced: true } }
+  }) as never)
+  on('ui.panes', (() => ({ value: open ? [{ id: PANE.requestId, isPlaced: true }] : [] })) as never)
+  answerFiles(on, log, {
+    'other.json': { mtimeMs: 5, text: other },
+    'broken.json': { mtimeMs: 5, text: null },
+    'notes.txt': { mtimeMs: 5, text: 'not a summary' },
+  })
+  // Opening the pane starts the reader: nothing is read while the pane is closed.
+  await $.session.start(SESSION as never)
+  expect(log.lists).toEqual([])
+  await $.command.run({ command: 'colony' } as never)
+  expect(open).toBe(true)
+  expect(log.lists).toContain(SHARE.folder)
+  expect(log.reads).toContain(`${SHARE.folder}/other.json`)
+  expect(log.reads).toContain(`${SHARE.folder}/broken.json`)
+  expect(log.reads).not.toContain(`${SHARE.folder}/notes.txt`)
+  const readsBefore = log.reads.length
+  await clock.advance(3_000)
+  // Polled again, but nothing changed: no file is read again.
+  expect(log.lists.length).toBeGreaterThan(1)
+  expect(log.reads.length).toBe(readsBefore)
 })

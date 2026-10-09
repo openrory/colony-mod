@@ -3,6 +3,8 @@ import { parsePeer, PEER_STALE_MS } from '../src/peers'
 import { initialColony, reduce, PEER_PREFIX, MAIN_ID } from '../src/model'
 import { attentionOf, readOptions } from '../src/runtime'
 import { summaryOf } from '../src/layout'
+import { mergeSessions } from '../src/sessions'
+import { parseSummary } from '../src/snapshot'
 
 const NOW = 1_000_000_000
 const file = (over: Record<string, unknown> = {}) =>
@@ -50,4 +52,27 @@ test('the sessions folder option is empty unless set', () => {
   expect(readOptions({}).sessionsDirectory).toBe('')
   expect(readOptions({ sessionsDirectory: ' /Users/me/.claude/sessions ' }).sessionsDirectory).toBe('/Users/me/.claude/sessions')
   expect(readOptions({ sessionsDirectory: 7 }).sessionsDirectory).toBe('')
+})
+
+test('a session that shares and is also a peer is drawn once, as shared', () => {
+  const summary = parseSummary(JSON.stringify({
+    version: 1,
+    sessionId: 'abc',
+    name: 'app-shared',
+    folder: '/Users/me/projects/app',
+    updatedAt: NOW,
+    agents: [{ id: 'main', label: 'main', parentId: null, state: 'in-progress' }],
+  }))!
+  const peer = parsePeer(file(), 'me', NOW)!
+  const groups = mergeSessions({
+    summaries: [{ sessionId: 'abc', summary }],
+    peers: [peer],
+    selfId: 'me',
+    now: NOW,
+    mtimes: { abc: NOW },
+  })
+  expect(Object.keys(groups)).toEqual(['abc'])
+  expect(groups.abc!.source).toBe('shared')
+  expect(groups.abc!.name).toBe('app-shared')
+  expect(groups.abc!.agents.map(a => a.id)).toEqual(['abc/main'])
 })

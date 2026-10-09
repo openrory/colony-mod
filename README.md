@@ -63,9 +63,28 @@ claude --plugin-dir ./colony-mod
 |---|---|---|
 | Reduced motion | off | static frames only; no animation timer |
 | Retention seconds | 30 | how long finished agents stay in the pane before they are removed |
+| Shared folder | empty | a folder you choose; set the **same** folder in every session to see all your sessions' agents in one pane. Empty means nothing is shared and nothing is read. See *Sharing across sessions* below |
 | Other sessions folder | empty | absolute path of your Claude Code session files (for example `/Users/you/.claude/sessions`). When set, your other running sessions also appear as figures (their busy or idle state, name and folder on hover). Empty means the mod never reads other sessions |
 
 Other sessions are shown as one figure each. Their own subagents are not visible from here, and a session that has quit can linger until its file is 6 hours old, because nothing in the file says whether it is still alive. The file format is not documented by Claude Code, so this may stop working after an update.
+
+## Sharing across sessions
+
+If you run several Claude Code sessions, you can open the pane in any of them and see **all** their agents and subagents together: each other session appears as a group beneath your own, with its agents, their states and the same 0s-and-1s exchanges. A group is marked `needs you` when one of its agents is waiting for your answer, and it dims with `stale` when its session stops updating.
+
+**It is off by default.** To turn it on, set the **Shared folder** option to the same folder in every session (for example `/Users/you/.claude/colony`; create the folder first). Clear the option to turn it off again; the session then stops sharing and stops reading the others.
+
+**What is shared.** Each session writes one small file, `<folder>/<session-id>.json`, every time something changes and about every 5 seconds as a heartbeat. It contains only:
+
+- the session's name and working folder, and a version number and last-updated time
+- for each agent: a short label (at most 40 characters), its state, its parent agent, its model, its token totals and what it is listening for
+- which agents are currently exchanging information
+
+It never contains your prompts, messages, tool inputs or outputs, or file contents. Only sessions that have set the same folder read these files, and nothing leaves your machine.
+
+**Cleaning up.** When a session ends or sharing is turned off, its file is overwritten with a marker that holds no name, folder or agent information. The mods API cannot delete files, so these tiny marker files stay in the folder; they are ignored after a minute and are safe to delete by hand at any time.
+
+**Sessions that do not share.** A session that has not set the shared folder (or does not have the mod) shows up only if you also set **Other sessions folder** (the older option above), and then as a single limited figure with no agent detail. The two options are independent.
 
 ## Update and uninstall
 
@@ -84,6 +103,9 @@ Use the plugin manager of your Claude Code build (`/plugin`) to update `colony` 
 - **Listening is only what the mod can see.** The mods API cannot list triggers configured before the session. An agent shows as listening after it starts a `Monitor` or `RemoteTrigger`, and an inbound event (for example from GitHub) labels its source. A scheduled wake-up is the agent's own timer and does not count.
 - **Which subagent is asking?** If the engine does not say which subagent raised a permission request, the mod attributes it to the most recently active agent.
 - **Failed vs. completed subagents** depend on the engine's agent list being up to date when a subagent stops.
+- **Sharing needs the mod in every session**, with the same Shared folder set in each. Updates reach other panes about a second late. It covers one user on one machine only.
+- **You choose the folder.** The mods API gives the mod no home-directory path, so there is no default shared folder.
+- **Very crowded panes:** if even the headers of many sessions do not fit, a group that needs you folds to its header (the `needs you` marker stays) before any group is dropped.
 - The mods API is early access and may change between Claude Code releases.
 
 ## Development

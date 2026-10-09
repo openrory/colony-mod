@@ -65,11 +65,51 @@ export type Exchange = {
   burstUntil: number;
 };
 
+// One agent as another session shares it (contracts/shared-summary.md). Only these fields exist.
+export type SharedAgent = {
+  id: string;
+  label: string;
+  parentId: string | null;
+  state: AgentState;
+  listenSource: string | null;
+  model: string | null;
+  tokens: { in: number; out: number } | null;
+};
+
+// A session's shared summary file (version 1). An ended marker carries no name and no folder.
+export type SharedSummary = {
+  version: 1;
+  sessionId: string;
+  name?: string;
+  folder?: string;
+  updatedAt: number;
+  ended?: boolean;
+  agents: SharedAgent[];
+  // Absent on an ended marker (contracts/shared-summary.md).
+  exchanges?: Array<{ from: string; to: string }>;
+};
+
+// Another session as the pane draws it: its agents when it shares (source `shared`), or a single
+// limited figure when it is only known from the sessions folder (source `peer`).
+export type SessionGroup = {
+  sessionId: string;
+  name: string;
+  folder: string;
+  updatedAt: number;
+  source: 'shared' | 'peer';
+  freshness: 'live' | 'stale';
+  agents: Agent[];
+  // The exchanges the session shares, with agent ids namespaced as the agents are (`<sessionId>/<id>`).
+  exchanges: Array<{ from: string; to: string }>;
+  needsAttention: boolean;
+};
+
 export type Colony = {
   agents: Record<string, Agent>;
   exchanges: Record<string, Exchange>;
   tick: number;
   retentionMs: number;
+  sessions: Record<string, SessionGroup>;
 };
 
 declare module 'claude-code' {

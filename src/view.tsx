@@ -21,6 +21,8 @@ const BLANK: Cell = { ch: ' ' }
 
 // The eye colour: bright against both the body colour and its darker fill.
 export const EYE_COLOUR = 'white'
+// The grey a stale session group is drawn in (dimmed, spec 002).
+export const STALE_COLOUR = '#5a5a5a'
 
 // Paint the background layer onto a cell grid: connectors, then streams, then the overflow line.
 export function paint(scene: Scene): Cell[][] {
@@ -30,12 +32,14 @@ export function paint(scene: Scene): Cell[][] {
     ...scene.streams.map(s => s.x + s.width),
     ...scene.connectors.map(c => c.x + 1),
     ...scene.figures.map(f => f.x + f.width),
+    ...scene.lines.map(l => l.segments.reduce((n, s) => n + [...s.text].length, 0)),
   )
   const height = Math.max(
     0,
     ...scene.figures.map(f => f.y + f.height),
     ...scene.streams.map(s => s.row + 1),
     ...scene.connectors.map(c => c.y + 1),
+    ...scene.lines.map(l => l.row + 1),
     scene.overflowRow + 1,
   )
   const grid: Cell[][] = Array.from({ length: Math.min(height, rows) }, () =>
@@ -49,6 +53,17 @@ export function paint(scene: Scene): Cell[][] {
     glyphs.forEach((ch, i) => {
       if (grid[s.row]?.[s.x + i]) grid[s.row]![s.x + i] = { ch, color: 'cyan' }
     })
+  }
+
+  // Group headers and their `+N done` lines (spec 002): text in its own style, clipped to the pane.
+  for (const line of scene.lines) {
+    let x = 0
+    for (const segment of line.segments) {
+      for (const ch of segment.text) {
+        if (grid[line.row]?.[x]) grid[line.row]![x] = { ch, color: segment.color, dim: segment.dim }
+        x++
+      }
+    }
   }
 
   if (scene.overflowRow >= 0 && grid[scene.overflowRow]) {
@@ -78,8 +93,13 @@ type Run = { text: string; color?: string; background?: string }
 // body from the feet up in the darker shade of the state colour; eyes stay bright.
 export function spriteRuns(figure: Figure): Run[][] {
   const cells = renderCells(figure.grid)
-  const body = figure.background ? BACKGROUND_COLOUR : STATE_COLOUR[figure.state]
-  const dark = figure.background ? BACKGROUND_COLOUR_DARK : (STATE_COLOUR_DARK[figure.state] ?? body)
+  // A stale group's figures are dimmed to one grey, whatever their state (spec 002).
+  const body = figure.stale ? STALE_COLOUR : figure.background ? BACKGROUND_COLOUR : STATE_COLOUR[figure.state]
+  const dark = figure.stale
+    ? STALE_COLOUR
+    : figure.background
+      ? BACKGROUND_COLOUR_DARK
+      : (STATE_COLOUR_DARK[figure.state] ?? body)
   const filledRows =
     figure.fill === null ? 0 : figure.fill <= 0 ? 0 : Math.max(1, Math.round(figure.fill * cells.length))
   return cells.map((row, r) => {
@@ -164,7 +184,7 @@ export function renderPane(scene: Scene, { Box, Text }: Tags) {
               ))}
             </Box>
           ))}
-          <Text dimColor>{figure.label.padEnd(figure.width)}</Text>
+          <Text dimColor={figure.stale}>{figure.label.padEnd(figure.width)}</Text>
         </Box>
       ))}
       {scene.figures.map((figure, i) => {

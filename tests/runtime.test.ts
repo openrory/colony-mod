@@ -8,7 +8,13 @@ import {
   attentionOf,
   shouldAutoOpen,
   shouldToastPending,
+  shouldWrite,
   statusFor,
+  pendingAgentsOf,
+  anyActiveOf,
+  summaryPath,
+  WRITE_MIN_MS,
+  HEARTBEAT_MS,
 } from '../src/runtime'
 import { initialColony, reduce, type Signal } from '../src/model'
 import type { AgentState, Colony } from '../types'
@@ -32,8 +38,14 @@ const state = (id: string, s: AgentState): Signal => ({
 })
 
 test('readOptions defaults to motion on and 30 s retention', () => {
-  expect(readOptions(undefined)).toEqual({ reducedMotion: false, retentionMs: 30_000, sessionsDirectory: '' })
-  expect(readOptions({})).toEqual({ reducedMotion: false, retentionMs: 30_000, sessionsDirectory: '' })
+  expect(readOptions(undefined)).toEqual({ reducedMotion: false, retentionMs: 30_000, sessionsDirectory: '', sharedFolder: '' })
+  expect(readOptions({})).toEqual({ reducedMotion: false, retentionMs: 30_000, sessionsDirectory: '', sharedFolder: '' })
+})
+
+test('readOptions reads sharedFolder as a trimmed string and empties anything else', () => {
+  expect(readOptions({ sharedFolder: ' /Users/me/shared ' }).sharedFolder).toBe('/Users/me/shared')
+  expect(readOptions({ sharedFolder: 7 }).sharedFolder).toBe('')
+  expect(readOptions({ sharedFolder: null }).sharedFolder).toBe('')
 })
 
 test('readOptions reads reduced motion and retention seconds from options', () => {
@@ -41,11 +53,13 @@ test('readOptions reads reduced motion and retention seconds from options', () =
     reducedMotion: true,
     retentionMs: 5_000,
     sessionsDirectory: '',
+    sharedFolder: '',
   })
   expect(readOptions({ reducedMotion: 'true', retentionSeconds: '12' })).toEqual({
     reducedMotion: true,
     retentionMs: 12_000,
     sessionsDirectory: '',
+    sharedFolder: '',
   })
 })
 
@@ -135,4 +149,87 @@ test('a pending toast fires only for a new pending while the open pane is unplac
   expect(
     shouldToastPending({ pendingCount: 1, previousPendingCount: 0, paneOpen: false, placed: false }),
   ).toBe(false)
+})
+
+test('shouldWrite writes a change at most once per second and a heartbeat every 5 s, busy or idle', () => {
+  expect(WRITE_MIN_MS).toBe(1000)
+  expect(HEARTBEAT_MS).toBe(5000)
+  const base = { changed: false, lastWriteAt: 0, now: 10_000, lastHeartbeatAt: 10_000 }
+  // Nothing changed and a heartbeat was just written: nothing to write.
+  expect(shouldWrite(base)).toBe(false)
+  // A change waits until a second has passed since the last write.
+  expect(shouldWrite({ ...base, changed: true, lastWriteAt: 9_500 })).toBe(false)
+  expect(shouldWrite({ ...base, changed: true, lastWriteAt: 9_000 })).toBe(true)
+  // A heartbeat is due every 5 s even when nothing changed (an idle session must not look stale).
+  expect(shouldWrite({ ...base, lastHeartbeatAt: 5_001 })).toBe(false)
+  expect(shouldWrite({ ...base, lastHeartbeatAt: 5_000 })).toBe(true)
+  expect(shouldWrite({ ...base, lastHeartbeatAt: 0 })).toBe(true)
+})
+
+test('a burst of changes is written once at its start and once as the trailing write', () => {
+  // The caller keeps `pending` until a write happens; here changes arrive at 0, 100 and 200 ms.
+  const changes = new Set([0, 100, 200])
+  let pending = false
+  let lastWrite = Number.NEGATIVE_INFINITY
+  const writes: number[] = []
+  for (let now = 0; now <= 2_000; now += 50) {
+    if (changes.has(now)) pending = true
+    if (shouldWrite({ changed: pending, lastWriteAt: lastWrite, now, lastHeartbeatAt: 0 })) {
+      writes.push(now)
+      pending = false
+      lastWrite = now
+    }
+  }
+  expect(writes).toEqual([0, 1_000])
+})
+
+// Other sessions that share (spec 002 FR-006, FR-009): their pending agents count; limited figures do not.
+function sharingSession(sessionId: string, freshness: 'live' | 'stale', state: AgentState, source: 'shared' | 'peer' = 'shared'): Signal {
+  const agents = source === 'shared'
+    ? [{ id: `${sessionId}/w`, label: 'w', parentId: null, state, reactUntil: null, listenSource: null } as unknown as Colony['agents'][string]]
+    : []
+  return {
+    type: 'sessions',
+    at: 0,
+    sessions: {
+      [sessionId]: { sessionId, name: sessionId, folder: '', updatedAt: 0, source, freshness, agents, exchanges: [], needsAttention: state === 'pending' },
+    },
+  }
+}
+
+test('status line counts pending and working agents of live sharing sessions', () => {
+  const c = colonyWith([added('main'), sharingSession('other', 'live', 'pending')])
+  expect(statusFor(c, true, false)).toBe('colony: 0 working, 1 needs you')
+  const busy = colonyWith([added('main'), sharingSession('other', 'live', 'in-progress')])
+  expect(statusFor(busy, true, false)).toBe('colony: 1 working')
+})
+
+test('a stale sharing session or a limited peer figure is not counted in the status line', () => {
+  const stale = colonyWith([added('main'), sharingSession('other', 'stale', 'pending')])
+  expect(statusFor(stale, true, false)).toBe('colony: 0 working')
+  const limited = colonyWith([added('main'), sharingSession('other', 'live', 'pending', 'peer')])
+  expect(statusFor(limited, true, false)).toBe('colony: 0 working')
+})
+
+test('pending agents of live sharing sessions are listed for the toast, limited figures are not', () => {
+  const c = colonyWith([added('main'), sharingSession('other', 'live', 'pending')])
+  expect(pendingAgentsOf(c).map(a => a.id)).toEqual(['other/w'])
+  expect(pendingAgentsOf(colonyWith([added('main'), sharingSession('x', 'live', 'pending', 'peer')]))).toEqual([])
+  expect(pendingAgentsOf(colonyWith([added('main'), sharingSession('x', 'stale', 'pending')]))).toEqual([])
+})
+
+test('attention for opening the pane still counts only this session', () => {
+  expect(attentionOf(colonyWith([added('main'), sharingSession('other', 'live', 'pending')]))).toBe(0)
+})
+
+test('the summary path is one json file per session in the folder, with no doubled slash', () => {
+  expect(summaryPath('/Users/me/shared', 'abc')).toBe('/Users/me/shared/abc.json')
+  expect(summaryPath('/Users/me/shared/', 'abc')).toBe('/Users/me/shared/abc.json')
+})
+
+test('anyActiveOf is true while an own agent is working or pending, never for idle or finished ones', () => {
+  expect(anyActiveOf(colonyWith([added('main')]))).toBe(false)
+  expect(anyActiveOf(colonyWith([added('main'), state('main', 'in-progress')]))).toBe(true)
+  expect(anyActiveOf(colonyWith([added('main'), state('main', 'pending')]))).toBe(true)
+  expect(anyActiveOf(colonyWith([added('main'), state('main', 'completed')]))).toBe(false)
 })

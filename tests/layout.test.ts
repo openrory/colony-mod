@@ -1,8 +1,10 @@
 import { test, expect } from 'claude-code/testing'
 import { initialColony, reduce, type Signal } from '../src/model'
-import { layout, FIGURE_HEIGHT, FIGURE_WIDTH, type Figure, type Scene } from '../src/layout'
-import type { Colony, Exchange } from '../types'
+import { layout, headerOf, FIGURE_HEIGHT, FIGURE_WIDTH, type Figure, type Scene, type Segment } from '../src/layout'
+import type { AgentState, Colony, Exchange, SessionGroup } from '../types'
 import { SPRITES } from '../src/sprites'
+import { mergeSessions } from '../src/sessions'
+import { PEER_PREFIX } from '../src/model'
 
 const RETENTION = 30_000
 
@@ -281,4 +283,168 @@ test('an agent no orchestrator started has no connector; agents in a parent cycl
   const t = figure(scene, 't')
   expect(scene.connectors.some(c => c.x === t.x + Math.floor(t.width / 2))).toBe(false)
   for (const id of ['x', 'y', 'self']) expect(figure(scene, id)).toBeDefined()
+})
+
+// ---- spec 002 (T009): session groups below the local session -------------------------------
+
+const NOW = 1_000_000
+
+type GroupSpec = {
+  id: string
+  name?: string
+  // How old the summary is (ms): under 10 s is live, 10 to 60 s is stale.
+  age?: number
+  agents?: Array<[string, string | null, AgentState?]>
+  exchanges?: Array<[string, string]>
+}
+
+// Groups come from mergeSessions, so ids are namespaced and freshness is derived as in the reader.
+function groupsOf(specs: GroupSpec[], peers: string[] = []): Record<string, SessionGroup> {
+  const summaries = specs.map(s => ({
+    sessionId: s.id,
+    summary: {
+      version: 1 as const,
+      sessionId: s.id,
+      name: s.name ?? s.id,
+      folder: `/work/${s.name ?? s.id}`,
+      updatedAt: NOW - (s.age ?? 0),
+      agents: (s.agents ?? [['main', null, 'in-progress' as AgentState]]).map(([id, parentId, state]) => ({
+        id,
+        label: id,
+        parentId,
+        state: state ?? ('in-progress' as AgentState),
+        listenSource: null,
+        model: null,
+        tokens: null,
+      })),
+      exchanges: (s.exchanges ?? []).map(([from, to]) => ({ from, to })),
+    },
+  }))
+  const peerList = peers.map(id => ({ id: PEER_PREFIX + id, label: `${id}-proj`, state: 'unknown' as AgentState, note: '' }))
+  return mergeSessions({ summaries, peers: peerList, selfId: 'self', now: NOW, mtimes: {} })
+}
+
+function withGroups(specs: GroupSpec[], peers: string[] = []): Colony {
+  return { ...withMain([sub('local')]), sessions: groupsOf(specs, peers) }
+}
+
+function groupOf(scene: Scene, sessionId: string) {
+  const g = scene.groups.find(x => x.sessionId === sessionId)
+  if (!g) throw new Error(`no group for ${sessionId}`)
+  return g
+}
+
+function textOf(segments: Segment[]): string {
+  return segments.map(s => s.text).join('')
+}
+
+function headerTextOf(scene: Scene, sessionId: string): string {
+  const row = groupOf(scene, sessionId).row
+  const line = scene.lines.find(l => l.row === row)
+  if (!line) throw new Error(`no header line at row ${row}`)
+  return textOf(line.segments)
+}
+
+test('each other session is a group below the local session, its agents namespaced and laid out like local ones', () => {
+  const colony = withGroups([{ id: 'other', name: 'proj', agents: [['main', null], ['c1', 'main']] }])
+  const scene = layout(colony, BIG, 0)
+  const group = groupOf(scene, 'other')
+  expect(group.expanded).toBe(true)
+  const localMain = figure(scene, 'main')
+  expect(group.row).toBeGreaterThanOrEqual(localMain.y + localMain.height)
+  const main = figure(scene, 'other/main')
+  const child = figure(scene, 'other/c1')
+  expect(main.y).toBeGreaterThan(group.row)
+  expect(child.y).toBeGreaterThan(main.y)
+  expect(scene.connectors.some(c => c.x === child.x + Math.floor(child.width / 2) && c.y > main.y)).toBe(true)
+  // The header carries the name and the folder.
+  expect(headerTextOf(scene, 'other')).toContain('proj')
+  expect(headerTextOf(scene, 'other')).toContain('/work/proj')
+  // Every figure of the group sits below its header row.
+  for (const f of scene.figures.filter(x => x.agentId.startsWith('other/'))) expect(f.y).toBeGreaterThan(group.row)
+})
+
+test('a group with a pending agent shows the needs-you marker, and the marker is kept when the group is collapsed', () => {
+  const colony = withGroups([{ id: 'other', name: 'proj', agents: [['main', null, 'pending']] }])
+  const scene = layout(colony, BIG, 0)
+  expect(headerTextOf(scene, 'other')).toContain('! needs you')
+  const session = colony.sessions['other']!
+  expect(textOf(headerOf(session, false))).toContain('! needs you')
+  expect(textOf(headerOf(session, false))).toContain('+1 agents')
+  expect(textOf(headerOf(session, true))).not.toContain('+1 agents')
+})
+
+test('a stale group is dimmed with stale in its header and its figures do not animate', () => {
+  const specs: GroupSpec[] = [
+    { id: 'old', name: 'old', age: 20_000, agents: [['main', null, 'in-progress'], ['c', 'main', 'in-progress']], exchanges: [['main', 'c']] },
+  ]
+  const colony = withGroups(specs)
+  const early = layout(colony, BIG, 0)
+  const later = layout(colony, BIG, 3)
+  expect(headerTextOf(early, 'old')).toContain('stale')
+  expect(figure(early, 'old/main').stale).toBe(true)
+  expect(figure(early, 'old/main').grid).toEqual(figure(later, 'old/main').grid)
+  expect(early.streams.filter(s => s.fromId.startsWith('old/'))).toEqual([])
+})
+
+test('a live group is not marked stale and an active exchange in it draws a stream with namespaced ids', () => {
+  const colony = withGroups([
+    { id: 'other', name: 'proj', agents: [['main', null], ['c1', 'main']], exchanges: [['main', 'c1']] },
+  ])
+  const scene = layout(colony, BIG, 0)
+  expect(headerTextOf(scene, 'other')).not.toContain('stale')
+  expect(figure(scene, 'other/main').stale).toBe(false)
+  expect(scene.streams.some(s => s.fromId === 'other/main' && s.toId === 'other/c1')).toBe(true)
+})
+
+test('a session known only from the sessions folder is one unknown figure with limited in its header', () => {
+  const colony = withGroups([], ['pid'])
+  const scene = layout(colony, BIG, 0)
+  const group = groupOf(scene, 'pid')
+  expect(group.source).toBe('peer')
+  expect(headerTextOf(scene, 'pid')).toContain('limited')
+  const figures = scene.figures.filter(f => f.agentId === 'pid')
+  expect(figures.length).toBe(1)
+  expect(figures[0]!.state).toBe('unknown')
+})
+
+test('when space is short, fresh quiet groups collapse first, then stale ones; attention groups and the local session never collapse', () => {
+  const colony = withGroups([
+    { id: 'quiet', name: 'quiet', agents: [['main', null], ['q1', 'main'], ['q2', 'main'], ['q3', 'main'], ['q4', 'main'], ['q5', 'main']] },
+    { id: 'stale', name: 'stale', age: 20_000, agents: [['main', null], ['s1', 'main'], ['s2', 'main']] },
+    { id: 'busy', name: 'busy', agents: [['main', null, 'pending']] },
+  ])
+  const scene = layout(colony, { columns: 80, rows: 24 }, 0)
+  expect(groupOf(scene, 'quiet').expanded).toBe(false)
+  expect(groupOf(scene, 'busy').expanded).toBe(true)
+  expect(figure(scene, 'local')).toBeDefined()
+  // A stale group only collapses after every fresh quiet group has.
+  if (!groupOf(scene, 'stale').expanded) expect(groupOf(scene, 'quiet').expanded).toBe(false)
+  // A collapsed group keeps its header and a count of its agents.
+  expect(headerTextOf(scene, 'quiet')).toContain('+6 agents')
+  expect(headerTextOf(scene, 'busy')).toContain('! needs you')
+})
+
+test('ten session groups stay inside the viewport and never overlap', () => {
+  const specs: GroupSpec[] = []
+  for (let i = 0; i < 10; i++) {
+    specs.push({
+      id: `s${i}`,
+      name: `proj${i}`,
+      agents: [['main', null], [`a${i}`, 'main'], [`b${i}`, 'main']],
+      age: i % 3 === 0 ? 20_000 : 0,
+    })
+  }
+  const view = { columns: 80, rows: 40 }
+  const scene = layout(withGroups(specs), view, 0)
+  for (let i = 0; i < scene.figures.length; i++) {
+    const f = scene.figures[i]!
+    expect(f.x).toBeGreaterThanOrEqual(0)
+    expect(f.x + f.width).toBeLessThanOrEqual(view.columns)
+    expect(f.y + f.height).toBeLessThanOrEqual(view.rows)
+    for (let j = i + 1; j < scene.figures.length; j++) expect(overlaps(f, scene.figures[j]!)).toBe(false)
+  }
+  const rows = scene.groups.map(g => g.row)
+  expect(new Set(rows).size).toBe(10)
+  for (const row of rows) expect(row).toBeLessThan(view.rows)
 })
