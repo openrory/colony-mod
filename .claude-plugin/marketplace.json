@@ -1,0 +1,13 @@
+{
+  "name": "colony-mod",
+  "owner": {
+    "name": "openrory"
+  },
+  "plugins": [
+    {
+      "name": "colony",
+      "source": "./"
+    }
+  ],
+  "description": "Colony: a side pane that shows Claude Code agents as pixel creatures"
+}

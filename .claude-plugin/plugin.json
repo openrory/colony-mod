@@ -1,0 +1,31 @@
+{
+  "name": "colony",
+  "version": "0.1.0",
+  "description": "Side pane showing agents as pixel creatures",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "reducedMotion": {
+      "type": "boolean",
+      "title": "Reduced motion",
+      "default": false,
+      "description": "Freeze the pane to static frames and stop the animation timer"
+    },
+    "retentionSeconds": {
+      "type": "number",
+      "title": "Retention seconds",
+      "default": 30,
+      "description": "Seconds a completed agent stays in the pane before it is removed"
+    },
+    "sessionsDirectory": {
+      "type": "string",
+      "title": "Other sessions folder",
+      "default": "",
+      "description": "Absolute path of the folder holding your Claude Code session files (for example /Users/you/.claude/sessions). Set it to also see your other running sessions as figures. Leave empty to never read other sessions."
+    }
+  },
+  "author": {
+    "name": "openrory"
+  },
+  "repository": "https://github.com/openrory/colony-mod",
+  "license": "MIT"
+}

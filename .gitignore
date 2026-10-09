@@ -1,0 +1,19 @@
+# Engine-generated type declarations (rewritten on every load)
+.claude-plugin/types/
+
+# Dependencies and build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# OS / editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Local environment
+.env
+.env.*
+
+# Local Claude Code settings
+.claude/settings.local.json

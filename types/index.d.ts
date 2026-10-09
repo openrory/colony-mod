@@ -1,0 +1,79 @@
+// PluginState contract for the colony mod. Self-contained: no imports.
+
+export type AgentState =
+  | 'idle'
+  | 'in-progress'
+  | 'pending'
+  | 'listening'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'unknown';
+
+export type Agent = {
+  id: string;
+  label: string;
+  parentId: string | null;
+  state: AgentState;
+  // The trigger registration (watch, webhook, a source label or external). It persists until an
+  // inbound event consumes it (see reactUntil); later work does not end it.
+  listenSource: string | null;
+  // End of the reaction flash after an inbound event (ms), or null when not reacting.
+  reactUntil: number | null;
+  startedAt: number | null;
+  endedAt: number | null;
+  lastEventAt: number;
+  // True while the engine's agent list (reconcile) names this agent; list status wins over silence.
+  listed: boolean;
+  // Columns this figure is pulled toward its exchange partner (0..2); eases one column per tick.
+  shift: number;
+  // The model it runs on, as the engine names it (an alias such as `haiku` or a full id), or null.
+  model: string | null;
+  // Tokens used so far, summed over its finished turns.
+  usage: Usage;
+  // Model requests seen in its current run (turn.step events); lets context be estimated from usage.
+  steps: number;
+  // Estimated tokens in its context window, or null before any estimate.
+  contextTokens: number | null;
+  // Columns the figure has wandered from its home cell, and where it is heading (-2..2, eased).
+  wander: number;
+  wanderTarget: number;
+  // Reusable: addressable by name or as a teammate, so it rests (idle) instead of being removed.
+  addressable: boolean;
+  // Not started by an orchestrator agent in this session (no connector to main is drawn).
+  independent: boolean;
+  // Known only by an id no agent list names (an engine fork or a workflow's agent): drawn muted.
+  background: boolean;
+  // The plugin that started it, when one did.
+  spawnedBy: string | null;
+  // A line for the hover card about where it lives (another session's folder and last update).
+  note: string | null;
+};
+
+export type Usage = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
+export type Exchange = {
+  id: string;
+  fromId: string;
+  toId: string;
+  reasons: Array<'spawn' | 'message' | 'waiting' | 'result'>;
+  burstUntil: number;
+};
+
+export type Colony = {
+  agents: Record<string, Agent>;
+  exchanges: Record<string, Exchange>;
+  tick: number;
+  retentionMs: number;
+};
+
+declare module 'claude-code' {
+  interface PluginState {
+    colony: { colony: Colony };
+  }
+}
