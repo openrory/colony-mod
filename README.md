@@ -63,17 +63,24 @@ claude --plugin-dir ./colony-mod
 |---|---|---|
 | Reduced motion | off | static frames only; no animation timer |
 | Retention seconds | 30 | how long finished agents stay in the pane before they are removed |
-| Share with my other sessions | off | turns on sharing of this session's agents with your other sessions, and showing theirs. Uses the shared folder (the default below). Set it in every session. See *Sharing across sessions* below |
-| Shared folder | empty | optional. Leave empty to use the default folder, `<your Claude folder>/colony`. Set a folder here only to override it, and then set the **same** folder in every session |
-| Other sessions folder | empty | absolute path of your Claude Code session files (for example `/Users/you/.claude/sessions`). When set, your other running sessions also appear as figures (their busy or idle state, name and folder on hover). Empty means the mod never reads other sessions |
+| Share with my other sessions | off | shares this session's agents with your other sessions and shows theirs, with full detail for sessions that share and a limited figure for the rest. Set it in every session. See *Sharing across sessions* below |
+| Sharing folder (optional) | empty | where this session shares its agents. Leave empty for the default, `<your Claude folder>/colony`, which is used while the sharing switch is on. Set the **same** folder in every session if you override it |
+| Claude session files folder (optional) | empty | where Claude Code keeps its session files. Leave empty for the default, `<your Claude folder>/sessions`, which is used while the sharing switch is on. Setting a folder here also turns on the limited view, even with the switch off |
 
-Other sessions are shown as one figure each. Their own subagents are not visible from here, and a session that has quit can linger until its file is 6 hours old, because nothing in the file says whether it is still alive. The file format is not documented by Claude Code, so this may stop working after an update.
+Sessions that share are shown in full. Other running sessions appear as one limited figure each (their busy or idle state, name and folder on hover), with no agent detail. A session that has quit can linger until its file is 6 hours old, because nothing in the file says whether it is still alive. The session files format is not documented by Claude Code, so this may stop working after an update.
 
 ## Sharing across sessions
 
-If you run several Claude Code sessions, you can open the pane in any of them and see **all** their agents and subagents together: each other session appears as a group beneath your own, with its agents, their states and the same 0s-and-1s exchanges. A group is marked `needs you` when one of its agents is waiting for your answer, and it dims with `stale` when its session stops updating.
+**It is off by default.** To use it, switch on **Share with my other sessions** in each session you want to take part. That is the whole setup: no folder needs setting. Then, in any of those sessions, the pane shows:
 
-**It is off by default.** To turn it on, switch on **Share with my other sessions** in every session. No folder is needed: sessions share through `<your Claude folder>/colony`, which is `$CLAUDE_CONFIG_DIR/colony` when that variable is set and otherwise `~/.claude/colony`. To use another folder, set **Shared folder** to the same absolute path in every session. Switch the option off again to stop sharing; the session then stops sharing and stops reading the others. (Sessions set up with a Shared folder before this version keep sharing without the switch.)
+- every other session that also has the switch on, in full: each appears as a group beneath your own, with its agents, their states and the same 0s-and-1s exchanges. A group is marked `needs you` when one of its agents is waiting for your answer, and it dims with `stale` when its session stops updating.
+- every other running session that does not share (or does not have the mod), as one limited figure with no agent detail.
+
+**Where the folders are.** Your Claude folder is `$CLAUDE_CONFIG_DIR` when that variable is set, and otherwise `~/.claude`. With the switch on, sessions share their agents in `<your Claude folder>/colony`, and the limited view reads Claude Code's own session files from `<your Claude folder>/sessions`. The two **optional** folder options replace those defaults: set one only to use another folder, and set the same path in every session that should see it. Setting an option also turns on its part, even with the switch off, so settings made with earlier versions keep working.
+
+Switch the option off again to stop sharing; the session then stops sharing and stops reading the others.
+
+**Claude Code's session files.** Turning the switch on also reads the `sessions` folder above, which holds Claude Code's own session files, to draw the limited figures. Those files are only read on this machine, by the same user. Their format is not a public interface and may change in a later Claude Code release, which would stop those figures from showing until the mod is updated.
 
 **What is shared.** Each session writes one small file, `<folder>/<session-id>.json`, every time something changes and about every 5 seconds as a heartbeat. It contains only:
 
@@ -81,11 +88,9 @@ If you run several Claude Code sessions, you can open the pane in any of them an
 - for each agent: a short label (at most 40 characters), its state, its parent agent, its model, its token totals and what it is listening for
 - which agents are currently exchanging information
 
-It never contains your prompts, messages, tool inputs or outputs, or file contents. Only sessions that have set the same folder read these files, and nothing leaves your machine.
+It never contains your prompts, messages, tool inputs or outputs, or file contents. Only sessions that use the same sharing folder read these files, and nothing leaves your machine.
 
 **Cleaning up.** When a session ends or sharing is turned off, its file is overwritten with a marker that holds no name, folder or agent information. The mods API cannot delete files, so these tiny marker files stay in the folder; they are ignored after a minute and are safe to delete by hand at any time.
-
-**Sessions that do not share.** A session that has not set the shared folder (or does not have the mod) shows up only if you also set **Other sessions folder** (the older option above), and then as a single limited figure with no agent detail. The two options are independent.
 
 ## Update and uninstall
 
@@ -104,8 +109,9 @@ Use the plugin manager of your Claude Code build (`/plugin`) to update `colony` 
 - **Listening is only what the mod can see.** The mods API cannot list triggers configured before the session. An agent shows as listening after it starts a `Monitor` or `RemoteTrigger`, and an inbound event (for example from GitHub) labels its source. A scheduled wake-up is the agent's own timer and does not count.
 - **Which subagent is asking?** If the engine does not say which subagent raised a permission request, the mod attributes it to the most recently active agent.
 - **Failed vs. completed subagents** depend on the engine's agent list being up to date when a subagent stops.
-- **Sharing needs the mod in every session**, with the same Shared folder set in each. Updates reach other panes about a second late. It covers one user on one machine only.
-- **Folder by default only in the config folder.** Sharing uses `CLAUDE_CONFIG_DIR` or `HOME` as read when the session starts. A session whose environment differs (for example a different `CLAUDE_CONFIG_DIR`) does not see the others unless it uses the same folder.
+- **Sharing needs the mod in every session**, with the switch on in each (and the same Sharing folder, if you override it). Updates reach other panes about a second late. It covers one user on one machine only.
+- **Default folders follow the environment.** `CLAUDE_CONFIG_DIR` or `HOME` is read when the session starts. A session whose environment differs (for example a different `CLAUDE_CONFIG_DIR`) does not see the others unless it uses the same folders, set explicitly.
+- **The limited view reads Claude Code's session files** once the switch is on, and their format is not public. A format change stops those figures from showing; it does not affect sharing between sessions that have the mod.
 - **Very crowded panes:** if even the headers of many sessions do not fit, a group that needs you folds to its header (the `needs you` marker stays) before any group is dropped.
 - The mods API is early access and may change between Claude Code releases.
 

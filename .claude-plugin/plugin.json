@@ -1,6 +1,6 @@
 {
   "name": "colony",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Side pane showing agents as pixel creatures",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -18,21 +18,21 @@
     },
     "sessionsDirectory": {
       "type": "string",
-      "title": "Other sessions folder",
+      "title": "Claude session files folder (optional)",
       "default": "",
-      "description": "Absolute path of the folder holding your Claude Code session files (for example /Users/you/.claude/sessions). Set it to also see your other running sessions as figures. Leave empty to never read other sessions."
+      "description": "Optional folder of Claude Code's session files, read to show other running sessions as limited figures; leave empty for the default, <your Claude folder>/sessions, which is used while the sharing switch is on."
     },
     "shareSessions": {
       "type": "boolean",
       "title": "Share with my other sessions",
       "default": false,
-      "description": "Turns on sharing of this session's agents with your other sessions, and showing theirs. Uses the folder below. Set it in every session."
+      "description": "Shares this session's agents with your other sessions and shows theirs, with full detail for sessions that share and a limited figure for the rest; off by default, so set it in every session."
     },
     "sharedFolder": {
       "type": "string",
-      "title": "Shared folder",
+      "title": "Sharing folder (optional)",
       "default": "",
-      "description": "Optional. Leave empty to use the default folder, <your Claude folder>/colony. Set the same folder in every session if you override it."
+      "description": "Optional folder where this session shares its agents; leave empty for the default, <your Claude folder>/colony, which is used while the sharing switch is on."
     }
   },
   "author": {

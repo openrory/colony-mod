@@ -1,5 +1,7 @@
 # Feature Specification: All-Sessions Pane
 
+> Option rules superseded by [spec 005](../005-one-switch-sharing/spec.md).
+
 **Feature Branch**: `002-all-sessions-pane`
 
 **Created**: 2026-10-09

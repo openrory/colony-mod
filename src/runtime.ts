@@ -35,7 +35,7 @@ export function readOptions(options: Readonly<Record<string, unknown>> | undefin
   return {
     reducedMotion: options?.reducedMotion === true || options?.reducedMotion === 'true',
     retentionMs: Math.round(seconds * 1000),
-    // Empty (the default) means other sessions are never read.
+    // Empty (the default) means the default folder (see sessionsFolderFor), read only while the switch is on.
     sessionsDirectory: typeof options?.sessionsDirectory === 'string' ? options.sessionsDirectory.trim() : '',
     shareSessions: options?.shareSessions === true || options?.shareSessions === 'true',
     sharedFolder: typeof options?.sharedFolder === 'string' ? options.sharedFolder.trim() : '',
@@ -61,6 +61,27 @@ export function sharedFolderFor(input: SharedFolderInput): string {
   const home = stripTrailingSlashes(input.home.trim())
   const base = configDir || (home ? `${home}/.claude` : '')
   return base ? `${base}/colony` : ''
+}
+
+// The folder the limited view of other sessions is read from (spec 003, spec 005). A set override wins, even
+// with the switch off (FR-003). Otherwise the switch decides: on gives <config dir>/sessions, where the config
+// dir is CLAUDE_CONFIG_DIR or else <home>/.claude; off gives '' (nothing is read, FR-005).
+export function sessionsFolderFor(input: SessionsFolderInput): string {
+  const override = input.sessionsDirectory.trim()
+  if (override !== '') return stripTrailingSlashes(override) || override
+  if (!input.shareSessions) return ''
+  const configDir = stripTrailingSlashes(input.configDir.trim())
+  const home = stripTrailingSlashes(input.home.trim())
+  const base = configDir || (home ? `${home}/.claude` : '')
+  return base ? `${base}/sessions` : ''
+}
+
+export type SessionsFolderInput = {
+  shareSessions: boolean
+  sessionsDirectory: string
+  // The CLAUDE_CONFIG_DIR and HOME values read at session start ('' when unset).
+  configDir: string
+  home: string
 }
 
 function stripTrailingSlashes(path: string): string {

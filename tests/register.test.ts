@@ -20,8 +20,14 @@ function answerEngine(on: On, seen: unknown[] = []) {
   }) as never)
   on('classic.PermissionRequest', (() => ({})) as never)
   on('command.register', (() => ({ value: {} })) as never)
-  on('ui.open', (() => ({ isPlaced: true })) as never)
+  on('ui.open', (() => {
+    paneOpened = true
+    return { value: { isPlaced: true } }
+  }) as never)
 }
+
+// Whether answerEngine's pane was opened; read by openablePane (spec 005 tests).
+let paneOpened = false
 
 const PANE = {
   plugin: 'colony',
@@ -315,6 +321,103 @@ test('with the switch on but neither CLAUDE_CONFIG_DIR nor HOME known, no folder
   await $.turn.start({ text: 'hello', turnId: 'turn_1' } as never)
   await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'ls' } } as never)
   await clock.advance(15_000)
+  await $.session.end({ reason: 'exit' } as never)
+  expect(log.writes).toEqual([])
+  expect(log.lists).toEqual([])
+  expect(log.reads).toEqual([])
+})
+
+// Spec 005: one switch covers both folders. The pane is opened by the person (/colony), so the readers run;
+// the test's fs answers record every list, read and write the plugin makes.
+function openablePane(on: On) {
+  paneOpened = false
+  on('ui.panes', (() => ({ value: paneOpened ? [{ id: PANE.requestId, isPlaced: true }] : [] })) as never)
+}
+
+test('with the switch off and no overrides, neither folder is listed, read or written, even with the pane open', async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, { HOME: '/home/tester' })
+  const log = emptyLog()
+  answerEngine(on)
+  answerFiles(on, log)
+  openablePane(on)
+  await $.session.start(SESSION as never)
+  await $.command.run({ command: 'colony' } as never)
+  await $.turn.start({ text: 'hello', turnId: 'turn_1' } as never)
+  await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'ls' } } as never)
+  await clock.advance(15_000)
+  await $.session.end({ reason: 'exit' } as never)
+  expect(log.writes).toEqual([])
+  expect(log.lists).toEqual([])
+  expect(log.reads).toEqual([])
+})
+
+test('with the switch on and no overrides, <HOME>/.claude/sessions is read and <HOME>/.claude/colony is written', { options: { shareSessions: true } }, async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, { HOME: '/home/tester' })
+  const log = emptyLog()
+  answerEngine(on)
+  answerFiles(on, log)
+  openablePane(on)
+  await $.session.start(SESSION as never)
+  await $.command.run({ command: 'colony' } as never)
+  await clock.advance(2_000)
+  await $.turn.start({ text: 'hello', turnId: 'turn_1' } as never)
+  expect(log.lists).toContain('/home/tester/.claude/sessions')
+  expect(log.writes.length).toBeGreaterThan(0)
+  for (const write of log.writes) expect(write.path).toBe(`/home/tester/.claude/colony/${SHARE.id}.json`)
+})
+
+test('with the switch on, CLAUDE_CONFIG_DIR wins over HOME for both folders', { options: { shareSessions: true } }, async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, { CLAUDE_CONFIG_DIR: '/cfg/claude', HOME: '/home/tester' })
+  const log = emptyLog()
+  answerEngine(on)
+  answerFiles(on, log)
+  openablePane(on)
+  await $.session.start(SESSION as never)
+  await $.command.run({ command: 'colony' } as never)
+  await clock.advance(2_000)
+  await $.turn.start({ text: 'hello', turnId: 'turn_1' } as never)
+  expect(log.lists).toContain('/cfg/claude/sessions')
+  expect(log.writes.length).toBeGreaterThan(0)
+  for (const write of log.writes) expect(write.path).toBe(`/cfg/claude/colony/${SHARE.id}.json`)
+  expect(log.lists.some(path => path.startsWith('/home/tester'))).toBe(false)
+})
+
+test('an old-style sessions folder override alone (switch off) is read for the limited view and nothing is written', { options: { sessionsDirectory: '/old/sessions' } }, async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, { HOME: '/home/tester' })
+  const log = emptyLog()
+  answerEngine(on)
+  answerFiles(on, log)
+  openablePane(on)
+  await $.session.start(SESSION as never)
+  await $.command.run({ command: 'colony' } as never)
+  await clock.advance(6_000)
+  await $.turn.start({ text: 'hello', turnId: 'turn_1' } as never)
+  await $.session.end({ reason: 'exit' } as never)
+  expect(log.lists).toContain('/old/sessions')
+  expect(log.lists.some(path => path.startsWith('/home/tester'))).toBe(false)
+  expect(log.writes).toEqual([])
+})
+
+test('with the switch on but the Claude folder unknown, the pane opens and no folder is touched', { options: { shareSessions: true } }, async ($, on) => {
+  const clock = mock.clock(on)
+  mock.store(on)
+  mock.env(on, {})
+  const log = emptyLog()
+  answerEngine(on)
+  answerFiles(on, log)
+  openablePane(on)
+  await $.session.start(SESSION as never)
+  await $.command.run({ command: 'colony' } as never)
+  await clock.advance(6_000)
+  await $.turn.start({ text: 'hello', turnId: 'turn_1' } as never)
   await $.session.end({ reason: 'exit' } as never)
   expect(log.writes).toEqual([])
   expect(log.lists).toEqual([])

@@ -1,5 +1,7 @@
 # Feature Specification: Agent Details and Other-Session Figures
 
+> Option rules superseded by [spec 005](../005-one-switch-sharing/spec.md).
+
 **Feature Branch**: `003-agent-details-and-peers`
 
 **Created**: 2026-10-09

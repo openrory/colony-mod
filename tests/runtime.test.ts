@@ -6,6 +6,7 @@ import {
   pendingIdsOf,
   readOptions,
   sharedFolderFor,
+  sessionsFolderFor,
   attentionOf,
   shouldAutoOpen,
   shouldToastPending,
@@ -264,6 +265,26 @@ test('with the switch on and no CLAUDE_CONFIG_DIR, the default is HOME/.claude/c
 
 test('with the switch on and neither CLAUDE_CONFIG_DIR nor HOME known, sharing stays off', () => {
   expect(sharedFolderFor({ shareSessions: true, sharedFolder: '', ...NO_ENV })).toBe('')
+})
+
+test('the sessions folder override wins (trimmed, no trailing slashes) even with the switch off', () => {
+  expect(sessionsFolderFor({ shareSessions: false, sessionsDirectory: ' /Users/me/.claude/sessions/ ', ...NO_ENV })).toBe('/Users/me/.claude/sessions')
+  expect(sessionsFolderFor({ shareSessions: true, sessionsDirectory: '/x/sessions', configDir: '/cfg', home: '/home/u' })).toBe('/x/sessions')
+  expect(sessionsFolderFor({ shareSessions: false, sessionsDirectory: '   ', ...NO_ENV })).toBe('')
+})
+
+test('with the switch on and no override, the sessions folder is CLAUDE_CONFIG_DIR/sessions, else HOME/.claude/sessions', () => {
+  expect(sessionsFolderFor({ shareSessions: true, sessionsDirectory: '', configDir: '/cfg/claude/', home: '/home/u' })).toBe('/cfg/claude/sessions')
+  expect(sessionsFolderFor({ shareSessions: true, sessionsDirectory: '', configDir: '', home: '/home/u/' })).toBe('/home/u/.claude/sessions')
+})
+
+test('with the switch off and no override, the sessions folder is empty whatever the environment', () => {
+  expect(sessionsFolderFor({ shareSessions: false, sessionsDirectory: '', configDir: '/cfg', home: '/home/u' })).toBe('')
+  expect(sessionsFolderFor({ shareSessions: false, sessionsDirectory: '', ...NO_ENV })).toBe('')
+})
+
+test('with the switch on and neither CLAUDE_CONFIG_DIR nor HOME known, the sessions folder stays off', () => {
+  expect(sessionsFolderFor({ shareSessions: true, sessionsDirectory: '', ...NO_ENV })).toBe('')
 })
 
 test('the summary path is one json file per session in the folder, with no doubled slash', () => {

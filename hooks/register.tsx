@@ -14,6 +14,7 @@ import {
   nextRecentAgent,
   pendingAgentsOf,
   readOptions,
+  sessionsFolderFor,
   sharedFolderFor,
   shouldAutoOpen,
   shouldToastPending,
@@ -41,14 +42,15 @@ export const colonyAtom = atom(
 // Module state for this load of the mod. Lost on reload, which is acceptable (see T018 notes).
 let reducedMotion = false
 let retentionMs = DEFAULT_RETENTION_MS
-let sessionsDirectory = ''
 let sessionTimer: { cancel: () => void } | null = null
 let shareTimer: { cancel: () => void } | null = null
-// The options as configured; the folder actually used (`sharedFolder`) is resolved at session start,
-// when the environment (CLAUDE_CONFIG_DIR, HOME) can be read. Until then sharing is off.
+// The options as configured; the folders actually used (`sharedFolder`, `sessionsFolder`) are resolved at
+// session start, when the environment (CLAUDE_CONFIG_DIR, HOME) can be read. Until then both are off.
 let shareSessions = false
 let sharedFolderOption = ''
+let sessionsDirectoryOption = ''
 let sharedFolder = ''
+let sessionsFolder = ''
 let recentAgentId: string | null = null
 let clockTimer: { cancel: () => void } | null = null
 let firstAutoDone = false
@@ -127,20 +129,22 @@ async function refreshPane($: Dollar): Promise<void> {
   lastPendingCount = pending.length
 }
 
-// Other sessions. Two sources, both read only while the pane is open: the shared folder (option
-// `sharedFolder`, spec 002) and the peer folder (option `sessionsDirectory`, spec 003). Nothing is read
-// from a folder the person has not named; a file that cannot be read or parsed is skipped.
+// Other sessions. Two sources, both read only while the pane is open: the shared folder (spec 002) and the
+// sessions folder (spec 003, the Claude session files). Both are resolved at session start (spec 005): one
+// switch turns on both defaults, and an override turns on its own part. Nothing is read from an empty folder
+// path; a file that cannot be read or parsed is skipped.
 const PEER_POLL_MS = 5000
 const SHARED_POLL_MS = 1000
 
 async function readPeers($: Dollar): Promise<Peer[]> {
+  if (!sessionsFolder) return []
   const now = await $.clock.now()
   const self = await Promise.resolve($.session.id()).catch(() => null)
   const peers: Peer[] = []
-  for (const entry of await $.fs.list(sessionsDirectory)) {
+  for (const entry of await $.fs.list(sessionsFolder)) {
     if (entry.kind !== 'file' || !entry.name.endsWith('.json')) continue
     try {
-      const text = await $.fs.read(`${sessionsDirectory.replace(/\/$/, '')}/${entry.name}`)
+      const text = await $.fs.read(`${sessionsFolder.replace(/\/$/, '')}/${entry.name}`)
       const peer = parsePeer(typeof text === 'string' ? text : '', self ?? null, now)
       if (peer) peers.push(peer)
     } catch {
@@ -204,7 +208,7 @@ async function selfIdOf($: Dollar): Promise<string | null> {
 // once. The peer figures are then groups too, so they are not also sent as agents.
 async function pollShared($: Dollar): Promise<void> {
   const now = await $.clock.now()
-  const peers = sessionsDirectory ? await readPeers($).catch((): Peer[] => []) : []
+  const peers = sessionsFolder ? await readPeers($).catch((): Peer[] => []) : []
   const { summaries, mtimes } = await readShared($)
   const sessions = mergeSessions({ summaries, peers, selfId: await selfIdOf($), now, mtimes })
   await applySignals($, [{ type: 'sessions', sessions, at: now }])
@@ -227,7 +231,7 @@ function stopSessions(): void {
 }
 
 async function startSessions($: Dollar): Promise<void> {
-  if ((!sharedFolder && !sessionsDirectory) || sessionTimer) return
+  if ((!sharedFolder && !sessionsFolder) || sessionTimer) return
   sessionTimer = $.clock.every(sharedFolder ? SHARED_POLL_MS : PEER_POLL_MS, () => {
     void pollSessions($).catch(() => {})
   })
@@ -351,12 +355,16 @@ async function listedRow($: Dollar, id: unknown): Promise<ListedAgent | undefine
   return (await listAgents($)).find(row => row.id === id)
 }
 
-// The effective shared folder, computed once per session start: the folder option, else <config dir>/colony.
-// A failed environment read counts as unset, so the default path is never guessed.
-async function resolveSharedFolder($: Dollar): Promise<string> {
+// The effective folders, computed once per session start: the shared folder (<config dir>/colony) and the
+// sessions folder (<config dir>/sessions), each unless its override is set. A failed environment read counts
+// as unset, so the default path is never guessed.
+async function resolveFolders($: Dollar): Promise<{ shared: string; sessions: string }> {
   const configDir = (await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined)) ?? ''
   const home = (await $.env.get('HOME').catch(() => undefined)) ?? ''
-  return sharedFolderFor({ shareSessions, sharedFolder: sharedFolderOption, configDir, home })
+  return {
+    shared: sharedFolderFor({ shareSessions, sharedFolder: sharedFolderOption, configDir, home }),
+    sessions: sessionsFolderFor({ shareSessions, sessionsDirectory: sessionsDirectoryOption, configDir, home }),
+  }
 }
 
 async function sessionStart($: Dollar, e: unknown): Promise<void> {
@@ -365,7 +373,9 @@ async function sessionStart($: Dollar, e: unknown): Promise<void> {
     description: 'Show or hide the agent colony pane',
   })
   await update($, colonyAtom, c => ({ ...c, retentionMs }))
-  sharedFolder = await resolveSharedFolder($)
+  const folders = await resolveFolders($)
+  sharedFolder = folders.shared
+  sessionsFolder = folders.sessions
   await endLeftoverShare($)
   if (sharedFolder) {
     sharingEnded = false
@@ -456,10 +466,11 @@ export const register: Register = (on, options) => {
   const parsed = readOptions(options as Readonly<Record<string, unknown>>)
   reducedMotion = parsed.reducedMotion
   retentionMs = parsed.retentionMs
-  sessionsDirectory = parsed.sessionsDirectory
+  sessionsDirectoryOption = parsed.sessionsDirectory
   shareSessions = parsed.shareSessions
   sharedFolderOption = parsed.sharedFolder
   sharedFolder = ''
+  sessionsFolder = ''
 
   on('session.start', ($, e, next) => guarded(() => sessionStart($, e), () => next(e)))
 

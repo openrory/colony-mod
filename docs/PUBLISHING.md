@@ -44,3 +44,7 @@ Adds the **Shared folder** option and the all-sessions pane (spec 002). No migra
 ## Releasing 0.2.2
 
 Fixes phantom figures when the *Other sessions folder* and the shared folder are the same: the mod's own summary files (including ended markers) are no longer read as sessions (spec 004). No option, default or file format changes, so no migration is needed.
+
+## Releasing 0.3.0
+
+One switch for sharing (spec 005): **Share with my other sessions** now also shows other running sessions as limited figures, read from `<your Claude folder>/sessions`, so the separate *Other sessions folder* option is no longer needed. Options are renamed (*Sharing folder (optional)*, *Claude session files folder (optional)*); their keys do not change, so existing settings keep working, and a user who set only the session files folder sees no change. No migration is needed. After pushing, check `/plugin` in a session with 0.2.2 installed, then switch the option on in two sessions and confirm both files appear in `<your Claude folder>/colony` and that a session with the switch off shows as a limited figure.
