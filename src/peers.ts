@@ -30,6 +30,9 @@ export function parsePeer(text: string, selfId: string | null, now: number): Pee
   }
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
+  // The mod's own shared summaries (spec 002) carry a list of agents; they are never sessions, even when
+  // the sessions folder and the shared folder are the same (spec 004). Session files have no such list.
+  if (Array.isArray(r.agents)) return null
   const sessionId = typeof r.sessionId === 'string' ? r.sessionId : ''
   if (!sessionId || sessionId === selfId) return null
   const updatedAt = typeof r.updatedAt === 'number' ? r.updatedAt : typeof r.startedAt === 'number' ? r.startedAt : 0

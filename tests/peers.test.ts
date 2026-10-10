@@ -76,3 +76,47 @@ test('a session that shares and is also a peer is drawn once, as shared', () => 
   expect(groups.abc!.name).toBe('app-shared')
   expect(groups.abc!.agents.map(a => a.id)).toEqual(['abc/main'])
 })
+
+// Spec 004: the mod's own shared summaries are never read as sessions (they carry an `agents` list).
+const summaryFile = (over: Record<string, unknown> = {}) =>
+  JSON.stringify({
+    version: 1,
+    sessionId: 'abc',
+    name: 'app-shared',
+    folder: '/Users/me/projects/app',
+    updatedAt: NOW,
+    ended: false,
+    agents: [{ id: 'main', label: 'main', parentId: null, state: 'in-progress' }],
+    exchanges: [],
+    ...over,
+  })
+
+test('shared summaries, live or ended, are never peers', () => {
+  expect(parsePeer(summaryFile(), 'me', NOW)).toBe(null)
+  expect(parsePeer(JSON.stringify({ version: 1, sessionId: 'abc', updatedAt: NOW, ended: true, agents: [] }), 'me', NOW)).toBe(null)
+  expect(parsePeer(summaryFile({ version: 9 }), 'me', NOW)).toBe(null)
+})
+
+test('a normal session record still parses, even with a string version or an agents field that is not a list', () => {
+  expect(parsePeer(file({ version: '2.1.295' }), 'me', NOW)!.label).toBe('app-a1')
+  expect(parsePeer(file({ agents: 'none' }), 'me', NOW)!.label).toBe('app-a1')
+})
+
+test('with both folders the same, a live summary and its session file show once and an ended marker shows nothing', () => {
+  const live = parseSummary(summaryFile())!
+  const text = [
+    summaryFile(),
+    file(),
+    JSON.stringify({ version: 1, sessionId: 'gone', updatedAt: NOW, ended: true, agents: [] }),
+  ]
+  const peers = text.map(t => parsePeer(t, 'me', NOW)).filter(p => p !== null)
+  const groups = mergeSessions({
+    summaries: [{ sessionId: 'abc', summary: live }],
+    peers,
+    selfId: 'me',
+    now: NOW,
+    mtimes: { abc: NOW },
+  })
+  expect(Object.keys(groups)).toEqual(['abc'])
+  expect(groups.abc!.source).toBe('shared')
+})

@@ -1,6 +1,6 @@
 {
   "name": "colony",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Side pane showing agents as pixel creatures",
   "types": "./types/index.d.ts",
   "userConfig": {

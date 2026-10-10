@@ -40,3 +40,7 @@ Adds the **Share with my other sessions** switch and a default shared folder, `<
 ## Releasing 0.2.0
 
 Adds the **Shared folder** option and the all-sessions pane (spec 002). No migration is needed: the option is empty by default, so existing installs behave as before. After pushing, check the update path with `/plugin` in a session that has 0.1.0 installed, then run the "All-sessions checks" in `specs/002-all-sessions-pane/quickstart.md` with two sessions.
+
+## Releasing 0.2.2
+
+Fixes phantom figures when the *Other sessions folder* and the shared folder are the same: the mod's own summary files (including ended markers) are no longer read as sessions (spec 004). No option, default or file format changes, so no migration is needed.
