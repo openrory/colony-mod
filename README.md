@@ -63,7 +63,8 @@ claude --plugin-dir ./colony-mod
 |---|---|---|
 | Reduced motion | off | static frames only; no animation timer |
 | Retention seconds | 30 | how long finished agents stay in the pane before they are removed |
-| Shared folder | empty | a folder you choose; set the **same** folder in every session to see all your sessions' agents in one pane. Empty means nothing is shared and nothing is read. See *Sharing across sessions* below |
+| Share with my other sessions | off | turns on sharing of this session's agents with your other sessions, and showing theirs. Uses the shared folder (the default below). Set it in every session. See *Sharing across sessions* below |
+| Shared folder | empty | optional. Leave empty to use the default folder, `<your Claude folder>/colony`. Set a folder here only to override it, and then set the **same** folder in every session |
 | Other sessions folder | empty | absolute path of your Claude Code session files (for example `/Users/you/.claude/sessions`). When set, your other running sessions also appear as figures (their busy or idle state, name and folder on hover). Empty means the mod never reads other sessions |
 
 Other sessions are shown as one figure each. Their own subagents are not visible from here, and a session that has quit can linger until its file is 6 hours old, because nothing in the file says whether it is still alive. The file format is not documented by Claude Code, so this may stop working after an update.
@@ -72,7 +73,7 @@ Other sessions are shown as one figure each. Their own subagents are not visible
 
 If you run several Claude Code sessions, you can open the pane in any of them and see **all** their agents and subagents together: each other session appears as a group beneath your own, with its agents, their states and the same 0s-and-1s exchanges. A group is marked `needs you` when one of its agents is waiting for your answer, and it dims with `stale` when its session stops updating.
 
-**It is off by default.** To turn it on, set the **Shared folder** option to the same folder in every session (for example `/Users/you/.claude/colony`; create the folder first). Clear the option to turn it off again; the session then stops sharing and stops reading the others.
+**It is off by default.** To turn it on, switch on **Share with my other sessions** in every session. No folder is needed: sessions share through `<your Claude folder>/colony`, which is `$CLAUDE_CONFIG_DIR/colony` when that variable is set and otherwise `~/.claude/colony`. To use another folder, set **Shared folder** to the same absolute path in every session. Switch the option off again to stop sharing; the session then stops sharing and stops reading the others. (Sessions set up with a Shared folder before this version keep sharing without the switch.)
 
 **What is shared.** Each session writes one small file, `<folder>/<session-id>.json`, every time something changes and about every 5 seconds as a heartbeat. It contains only:
 
@@ -104,7 +105,7 @@ Use the plugin manager of your Claude Code build (`/plugin`) to update `colony` 
 - **Which subagent is asking?** If the engine does not say which subagent raised a permission request, the mod attributes it to the most recently active agent.
 - **Failed vs. completed subagents** depend on the engine's agent list being up to date when a subagent stops.
 - **Sharing needs the mod in every session**, with the same Shared folder set in each. Updates reach other panes about a second late. It covers one user on one machine only.
-- **You choose the folder.** The mods API gives the mod no home-directory path, so there is no default shared folder.
+- **Folder by default only in the config folder.** Sharing uses `CLAUDE_CONFIG_DIR` or `HOME` as read when the session starts. A session whose environment differs (for example a different `CLAUDE_CONFIG_DIR`) does not see the others unless it uses the same folder.
 - **Very crowded panes:** if even the headers of many sessions do not fit, a group that needs you folds to its header (the `needs you` marker stays) before any group is dropped.
 - The mods API is early access and may change between Claude Code releases.
 

@@ -14,6 +14,7 @@ import {
   nextRecentAgent,
   pendingAgentsOf,
   readOptions,
+  sharedFolderFor,
   shouldAutoOpen,
   shouldToastPending,
   shouldWrite,
@@ -43,6 +44,10 @@ let retentionMs = DEFAULT_RETENTION_MS
 let sessionsDirectory = ''
 let sessionTimer: { cancel: () => void } | null = null
 let shareTimer: { cancel: () => void } | null = null
+// The options as configured; the folder actually used (`sharedFolder`) is resolved at session start,
+// when the environment (CLAUDE_CONFIG_DIR, HOME) can be read. Until then sharing is off.
+let shareSessions = false
+let sharedFolderOption = ''
 let sharedFolder = ''
 let recentAgentId: string | null = null
 let clockTimer: { cancel: () => void } | null = null
@@ -346,12 +351,21 @@ async function listedRow($: Dollar, id: unknown): Promise<ListedAgent | undefine
   return (await listAgents($)).find(row => row.id === id)
 }
 
+// The effective shared folder, computed once per session start: the folder option, else <config dir>/colony.
+// A failed environment read counts as unset, so the default path is never guessed.
+async function resolveSharedFolder($: Dollar): Promise<string> {
+  const configDir = (await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined)) ?? ''
+  const home = (await $.env.get('HOME').catch(() => undefined)) ?? ''
+  return sharedFolderFor({ shareSessions, sharedFolder: sharedFolderOption, configDir, home })
+}
+
 async function sessionStart($: Dollar, e: unknown): Promise<void> {
   await $.command.register({
     name: 'colony',
     description: 'Show or hide the agent colony pane',
   })
   await update($, colonyAtom, c => ({ ...c, retentionMs }))
+  sharedFolder = await resolveSharedFolder($)
   await endLeftoverShare($)
   if (sharedFolder) {
     sharingEnded = false
@@ -443,7 +457,9 @@ export const register: Register = (on, options) => {
   reducedMotion = parsed.reducedMotion
   retentionMs = parsed.retentionMs
   sessionsDirectory = parsed.sessionsDirectory
-  sharedFolder = parsed.sharedFolder
+  shareSessions = parsed.shareSessions
+  sharedFolderOption = parsed.sharedFolder
+  sharedFolder = ''
 
   on('session.start', ($, e, next) => guarded(() => sessionStart($, e), () => next(e)))
 

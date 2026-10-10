@@ -67,6 +67,8 @@ description: "Task list for All-Sessions Pane"
 - [X] T016 [US1] Keep the spec 003 behaviour intact: the existing peer view stays the fallback (FR-007) controlled by `sessionsDirectory`; add a regression test in `tests/peers.test.ts` that a session present in both sources is drawn once, as shared; the two options (`sharedFolder`, `sessionsDirectory`) are independent and the README must say so
 - [X] T017 [US1] Run `claude plugin validate .` and `claude plugin test .`; fix issues. Then type-check with a scratch tsconfig outside the repo that points `claude-code` at the engine declarations (as done in spec 001). Manual quickstart scenarios stay for the user
 
+- [X] T022 [US1] Make the shared folder default to `<config dir>/colony` with an explicit switch (release 0.2.1): add the boolean option `shareSessions` (default false, sharing stays opt-in per FR-002) to `.claude-plugin/plugin.json`, make `sharedFolder` optional (empty = default folder); add the pure helper `sharedFolderFor` in `src/runtime.ts` and `shareSessions` in `readOptions`/`ColonyOptions`; in `hooks/register.tsx` read `CLAUDE_CONFIG_DIR` and `HOME` through `$.env.get` at session start and use the resolved folder for the writer, reader, `lastSharedFolder` and the ended marker; tests in `tests/runtime.test.ts` for every branch and in `tests/register.test.ts` for the HOME default, `CLAUDE_CONFIG_DIR` precedence, no environment, and the switch off
+
 **Checkpoint**: the story works end to end in tests; live behaviour is the user's to verify.
 
 ---

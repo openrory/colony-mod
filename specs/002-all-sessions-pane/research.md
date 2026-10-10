@@ -16,10 +16,10 @@ Source: the mods plugin-authoring reference and the engine's `claude-code.d.ts` 
 
 ## R3. Where the shared folder lives
 
-- **Finding**: the API gives no home or config directory path, so the mod cannot choose a default location.
-- **Decision**: a new option `sharedFolder` (absolute path, default empty). Empty = sharing off and no reading of other sessions' shared state (FR-002, SC-003). Set = this session writes its summary there and its pane reads all summaries there. The same user settings apply to all of the user's sessions, so one setting turns it on everywhere. The existing `sessionsDirectory` option keeps controlling only the fallback peer view.
+- **Finding (corrected)**: the API does give the environment: `$.env.get("HOME")` and `$.env.get("CLAUDE_CONFIG_DIR")` resolve variables (string literals only, listed by `claude plugin validate`). An earlier note said the API had no home path; that was wrong. Tests can mock them with `mock.env`.
+- **Decision**: a boolean option `shareSessions` (default false) is the switch. Off = sharing off and no reading of other sessions' shared state (FR-002, SC-003). On = the folder is `<config dir>/colony`, where the config dir is `CLAUDE_CONFIG_DIR` or else `<HOME>/.claude`, so no folder has to be typed. An optional option `sharedFolder` (absolute path, default empty) overrides the folder; a non-empty `sharedFolder` also turns sharing on, so 0.2.0 users keep sharing. The folder is resolved once at session start by the pure helper `sharedFolderFor` (`src/runtime.ts`). The same user settings apply to all of the user's sessions, so one setting turns it on everywhere. The existing `sessionsDirectory` option keeps controlling only the fallback peer view.
 - **Session name and folder**: the API gives `$.session.cwd()` and `$.session.id()` but no session name, so the name is derived from the last segment of the folder (or a short id). A change to an option in the config menu reloads the mod, so turning sharing on or off takes effect without a restart; module variables reset on reload, so the previously used folder is remembered in `$.store`.
-- **Two options**: `sharedFolder` controls sharing; the existing `sessionsDirectory` (spec 003) controls the fallback view of sessions that do not share.
+- **Two options**: `shareSessions` (and the optional `sharedFolder`) control sharing; the existing `sessionsDirectory` (spec 003) controls the fallback view of sessions that do not share.
 - **Alternatives**: a single option for both (simpler, but the fallback needs the folder holding Claude Code's own session files, which is a different location).
 
 ## R4. Write and read cadence

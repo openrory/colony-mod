@@ -33,6 +33,10 @@ Repository: https://github.com/openrory/colony-mod
 - `Marketplace file not found at …`: `.claude-plugin/marketplace.json` is missing from the default branch.
 - `Plugin "colony" not found in marketplace …`: the plugin `name` in `marketplace.json` must equal `name` in `.claude-plugin/plugin.json`.
 
+## Releasing 0.2.1
+
+Adds the **Share with my other sessions** switch and a default shared folder, `<your Claude folder>/colony`, so users no longer type a path. Sharing stays off by default. Users who set **Shared folder** in 0.2.0 keep sharing with no change. No migration is needed. After pushing, check `/plugin` in a session with 0.2.0 installed, then switch the option on in two sessions and confirm both files appear in `<your Claude folder>/colony`.
+
 ## Releasing 0.2.0
 
 Adds the **Shared folder** option and the all-sessions pane (spec 002). No migration is needed: the option is empty by default, so existing installs behave as before. After pushing, check the update path with `/plugin` in a session that has 0.1.0 installed, then run the "All-sessions checks" in `specs/002-all-sessions-pane/quickstart.md` with two sessions.

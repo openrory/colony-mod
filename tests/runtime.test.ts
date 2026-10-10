@@ -5,6 +5,7 @@ import {
   nextRecentAgent,
   pendingIdsOf,
   readOptions,
+  sharedFolderFor,
   attentionOf,
   shouldAutoOpen,
   shouldToastPending,
@@ -37,9 +38,18 @@ const state = (id: string, s: AgentState): Signal => ({
   at: 0,
 })
 
-test('readOptions defaults to motion on and 30 s retention', () => {
-  expect(readOptions(undefined)).toEqual({ reducedMotion: false, retentionMs: 30_000, sessionsDirectory: '', sharedFolder: '' })
-  expect(readOptions({})).toEqual({ reducedMotion: false, retentionMs: 30_000, sessionsDirectory: '', sharedFolder: '' })
+test('readOptions defaults to motion on, 30 s retention and sharing off', () => {
+  const defaults = { reducedMotion: false, retentionMs: 30_000, sessionsDirectory: '', shareSessions: false, sharedFolder: '' }
+  expect(readOptions(undefined)).toEqual(defaults)
+  expect(readOptions({})).toEqual(defaults)
+})
+
+test('readOptions reads the share switch from a boolean or the string true only', () => {
+  expect(readOptions({ shareSessions: true }).shareSessions).toBe(true)
+  expect(readOptions({ shareSessions: 'true' }).shareSessions).toBe(true)
+  expect(readOptions({ shareSessions: false }).shareSessions).toBe(false)
+  expect(readOptions({ shareSessions: 'yes' }).shareSessions).toBe(false)
+  expect(readOptions({ shareSessions: 1 }).shareSessions).toBe(false)
 })
 
 test('readOptions reads sharedFolder as a trimmed string and empties anything else', () => {
@@ -53,12 +63,14 @@ test('readOptions reads reduced motion and retention seconds from options', () =
     reducedMotion: true,
     retentionMs: 5_000,
     sessionsDirectory: '',
+    shareSessions: false,
     sharedFolder: '',
   })
   expect(readOptions({ reducedMotion: 'true', retentionSeconds: '12' })).toEqual({
     reducedMotion: true,
     retentionMs: 12_000,
     sessionsDirectory: '',
+    shareSessions: false,
     sharedFolder: '',
   })
 })
@@ -220,6 +232,38 @@ test('pending agents of live sharing sessions are listed for the toast, limited 
 
 test('attention for opening the pane still counts only this session', () => {
   expect(attentionOf(colonyWith([added('main'), sharingSession('other', 'live', 'pending')]))).toBe(0)
+})
+
+const NO_ENV = { configDir: '', home: '' }
+
+test('sharing is off when the switch is off and no folder is set, whatever the environment', () => {
+  expect(sharedFolderFor({ shareSessions: false, sharedFolder: '', ...NO_ENV })).toBe('')
+  expect(sharedFolderFor({ shareSessions: false, sharedFolder: '', configDir: '/cfg', home: '/home/u' })).toBe('')
+  expect(sharedFolderFor({ shareSessions: false, sharedFolder: '   ', configDir: '', home: '/home/u' })).toBe('')
+})
+
+test('a set folder is used as given (trimmed) when sharing is on or off, and wins over the default', () => {
+  expect(sharedFolderFor({ shareSessions: false, sharedFolder: ' /Users/me/shared ', ...NO_ENV })).toBe('/Users/me/shared')
+  expect(sharedFolderFor({ shareSessions: true, sharedFolder: '/Users/me/shared', configDir: '/cfg', home: '/home/u' })).toBe('/Users/me/shared')
+})
+
+test('a set folder loses its trailing slashes', () => {
+  expect(sharedFolderFor({ shareSessions: false, sharedFolder: '/Users/me/shared//', ...NO_ENV })).toBe('/Users/me/shared')
+  expect(sharedFolderFor({ shareSessions: true, sharedFolder: '/Users/me/shared/', ...NO_ENV })).toBe('/Users/me/shared')
+})
+
+test('with the switch on and no folder set, the default is CLAUDE_CONFIG_DIR/colony', () => {
+  expect(sharedFolderFor({ shareSessions: true, sharedFolder: '', configDir: '/cfg/claude', home: '/home/u' })).toBe('/cfg/claude/colony')
+  expect(sharedFolderFor({ shareSessions: true, sharedFolder: '', configDir: '/cfg/claude/', home: '' })).toBe('/cfg/claude/colony')
+})
+
+test('with the switch on and no CLAUDE_CONFIG_DIR, the default is HOME/.claude/colony', () => {
+  expect(sharedFolderFor({ shareSessions: true, sharedFolder: '', configDir: '', home: '/home/u' })).toBe('/home/u/.claude/colony')
+  expect(sharedFolderFor({ shareSessions: true, sharedFolder: '', configDir: '  ', home: '/home/u/' })).toBe('/home/u/.claude/colony')
+})
+
+test('with the switch on and neither CLAUDE_CONFIG_DIR nor HOME known, sharing stays off', () => {
+  expect(sharedFolderFor({ shareSessions: true, sharedFolder: '', ...NO_ENV })).toBe('')
 })
 
 test('the summary path is one json file per session in the folder, with no doubled slash', () => {

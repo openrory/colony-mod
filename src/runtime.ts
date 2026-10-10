@@ -19,7 +19,9 @@ export type ColonyOptions = {
   reducedMotion: boolean
   retentionMs: number
   sessionsDirectory: string
-  // Empty (the default) means nothing is shared and no other session's shared state is read.
+  // The "Share with my other sessions" switch (off by default, FR-002).
+  shareSessions: boolean
+  // The optional folder override. Empty means the default folder (see sharedFolderFor), or nothing when sharing is off.
   sharedFolder: string
 }
 
@@ -35,8 +37,34 @@ export function readOptions(options: Readonly<Record<string, unknown>> | undefin
     retentionMs: Math.round(seconds * 1000),
     // Empty (the default) means other sessions are never read.
     sessionsDirectory: typeof options?.sessionsDirectory === 'string' ? options.sessionsDirectory.trim() : '',
+    shareSessions: options?.shareSessions === true || options?.shareSessions === 'true',
     sharedFolder: typeof options?.sharedFolder === 'string' ? options.sharedFolder.trim() : '',
   }
+}
+
+export type SharedFolderInput = {
+  shareSessions: boolean
+  sharedFolder: string
+  // The CLAUDE_CONFIG_DIR and HOME values read at session start ('' when unset).
+  configDir: string
+  home: string
+}
+
+// The folder this session shares to and reads from (spec 002). '' means sharing is off: nothing is written
+// or read. Sharing is on when the switch is on or a folder is set. A set folder wins; otherwise the folder is
+// <config dir>/colony, where the config dir is CLAUDE_CONFIG_DIR or else <home>/.claude.
+export function sharedFolderFor(input: SharedFolderInput): string {
+  const override = input.sharedFolder.trim()
+  if (override !== '') return stripTrailingSlashes(override) || override
+  if (!input.shareSessions) return ''
+  const configDir = stripTrailingSlashes(input.configDir.trim())
+  const home = stripTrailingSlashes(input.home.trim())
+  const base = configDir || (home ? `${home}/.claude` : '')
+  return base ? `${base}/colony` : ''
+}
+
+function stripTrailingSlashes(path: string): string {
+  return path.replace(/\/+$/, '')
 }
 
 export function pendingIdsOf(colony: Colony): string[] {
@@ -98,7 +126,7 @@ export function anyActiveOf(colony: Colony): boolean {
 
 // The file a session's summary goes to in the shared folder: one `<sessionId>.json` per session.
 export function summaryPath(folder: string, sessionId: string): string {
-  return `${folder.replace(/\/+$/, '')}/${sessionId}.json`
+  return `${stripTrailingSlashes(folder)}/${sessionId}.json`
 }
 
 // What justifies opening the pane: pending agents plus subagents (main alone never does).
